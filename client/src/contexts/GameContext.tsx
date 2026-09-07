@@ -1,6 +1,6 @@
 import { createContext, useContext, useEffect, useRef, useState, ReactNode } from "react";
 import { socket, emitWithAck } from "../socket";
-import { PublicRoomState, QuestionPayload, ChatMessage } from "../types";
+import { PublicRoomState, QuestionPayload, ChatMessage, FinalResult } from "../types";
 
 type ConnectionStatus = "online" | "reconnecting" | "offline";
 
@@ -11,6 +11,8 @@ interface GameContextValue {
   messages: ChatMessage[];
   partnerStatus: ConnectionStatus;
   lastReveal: { answers: Record<string, string>; isMatch: boolean } | null;
+  finalResult: FinalResult | null;
+  resetSession: () => void;
   createRoom: (displayName: string, gameType: string) => Promise<{ code: string; roomId: string } | null>;
   joinRoom: (displayName: string, code: string) => Promise<boolean>;
   setReady: (ready: boolean) => void;
@@ -31,6 +33,7 @@ export function GameProvider({ children }: { children: ReactNode }) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [partnerStatus, setPartnerStatus] = useState<ConnectionStatus>("online");
   const [lastReveal, setLastReveal] = useState<{ answers: Record<string, string>; isMatch: boolean } | null>(null);
+  const [finalResult, setFinalResult] = useState<FinalResult | null>(null);
   const roomIdRef = useRef<string | null>(null);
 
   // Tentative de reprise automatique après refresh / reconnexion (cas #24.4, #24.12)
@@ -72,8 +75,13 @@ export function GameProvider({ children }: { children: ReactNode }) {
       setLastReveal({ answers, isMatch });
       setRoomState((prev) => (prev ? { ...prev, scores } : prev));
     });
-    socket.on("game:finished", () => {
-      /* la page Room affiche l'écran final à partir de cet event */
+    socket.on("game:finished", (data: { result?: FinalResult; state?: PublicRoomState; abandoned?: boolean; reason?: string }) => {
+      if (data.abandoned) {
+        setFinalResult({ coupleScorePct: 0, player1Score: 0, player2Score: 0, abandoned: true, reason: data.reason });
+      } else if (data.result) {
+        setRoomState(data.state ?? null);
+        setFinalResult(data.result);
+      }
     });
     socket.on("chat:message", (msg: ChatMessage) => setMessages((prev) => [...prev, msg]));
 
@@ -146,6 +154,17 @@ export function GameProvider({ children }: { children: ReactNode }) {
     socket.emit("chat:message", { roomId: roomIdRef.current, text });
   }
 
+  function resetSession() {
+    localStorage.removeItem(STORAGE_KEY);
+    roomIdRef.current = null;
+    setPlayerId(null);
+    setRoomState(null);
+    setCurrentQuestion(null);
+    setLastReveal(null);
+    setFinalResult(null);
+    setMessages([]);
+  }
+
   return (
     <GameContext.Provider
       value={{
@@ -155,6 +174,8 @@ export function GameProvider({ children }: { children: ReactNode }) {
         messages,
         partnerStatus,
         lastReveal,
+        finalResult,
+        resetSession,
         createRoom,
         joinRoom,
         setReady,

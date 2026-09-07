@@ -34,3 +34,11 @@ export interface ChatMessage {
   text: string;
   createdAt: number;
 }
+
+export interface FinalResult {
+  coupleScorePct: number;
+  player1Score: number;
+  player2Score: number;
+  abandoned?: boolean;
+  reason?: string;
+}

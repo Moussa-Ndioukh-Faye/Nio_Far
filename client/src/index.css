@@ -2,6 +2,74 @@
 @tailwind components;
 @tailwind utilities;
 
-body {
-  @apply bg-neutral-950 text-neutral-50 antialiased;
+@layer base {
+  html {
+    color-scheme: dark;
+  }
+
+  body {
+    @apply bg-ink text-paper font-sans antialiased;
+    background-image:
+      radial-gradient(1100px 620px at 18% -12%, rgba(199, 75, 47, 0.2), transparent 62%),
+      radial-gradient(900px 520px at 112% 24%, rgba(230, 168, 55, 0.09), transparent 58%),
+      radial-gradient(1000px 700px at 50% 115%, rgba(107, 143, 111, 0.08), transparent 60%),
+      repeating-linear-gradient(0deg, rgba(244, 233, 216, 0.028) 0 1px, transparent 1px 24px),
+      repeating-linear-gradient(90deg, rgba(244, 233, 216, 0.028) 0 1px, transparent 1px 24px);
+    background-attachment: fixed;
+  }
+
+  body::after {
+    content: "";
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    z-index: 60;
+    opacity: 0.5;
+    mix-blend-mode: overlay;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.16'/%3E%3C/svg%3E");
+  }
+
+  ::selection {
+    background: rgba(199, 75, 47, 0.85);
+    color: #f4e9d8;
+  }
+
+  :focus-visible {
+    outline: 2px solid rgba(230, 168, 55, 0.85);
+    outline-offset: 2px;
+    border-radius: 6px;
+  }
+
+  input,
+  button,
+  select {
+    font-family: inherit;
+  }
+}
+
+@layer components {
+  .field {
+    @apply w-full rounded-2xl border border-line bg-ink2/80 px-4 py-3 text-paper placeholder:text-mute outline-none transition duration-200 focus:border-saffron/60 focus:shadow-glowSaffron focus:bg-ink2;
+  }
+
+  .btn {
+    @apply inline-flex items-center justify-center gap-2 rounded-2xl px-5 py-3 font-semibold transition duration-200 select-none disabled:cursor-not-allowed disabled:opacity-50;
+  }
+
+  .btn-clay {
+    @apply btn text-paper shadow-glowClay hover:bg-clayDeep active:translate-y-px;
+    background: linear-gradient(180deg, #d4573a, #b8482a);
+  }
+
+  .btn-ghost {
+    @apply btn border border-line bg-ink2/70 text-sand hover:border-clay/50 hover:text-paper hover:bg-ink3 active:translate-y-px;
+  }
+
+  .eyebrow {
+    @apply text-[0.7rem] font-semibold uppercase tracking-[0.28em] text-sand;
+  }
+
+  .card {
+    @apply rounded-3xl border border-line bg-ink2/70 shadow-card backdrop-blur-sm;
+  }
 }

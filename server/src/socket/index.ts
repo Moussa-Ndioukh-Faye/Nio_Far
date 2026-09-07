@@ -2,6 +2,7 @@ import { Server, Socket } from "socket.io";
 import { nanoid } from "nanoid/non-secure";
 import { roomManager } from "../game-engine/RoomManager";
 import { loadContentForGame, prisma } from "../services/contentService";
+import { upsertPlayerConnection, markPlayerDisconnected } from "../services/persistence";
 import { logger } from "../utils/logger";
 import { isSocketRateLimited, clearSocketRateLimit } from "../middleware/rateLimit";
 import {
@@ -51,6 +52,13 @@ export function registerSocketHandlers(io: Server) {
         })
         .catch((e: unknown) => logger.warn("Persist gameSession failed", e));
 
+      await upsertPlayerConnection({
+        playerId,
+        sessionId: engine.getRoomId(),
+        socketId: socket.id,
+        displayName: parsed.data.displayName,
+      });
+
       socket.join(engine.getRoomId());
       ack?.({
         ok: true,
@@ -88,6 +96,13 @@ export function registerSocketHandlers(io: Server) {
 
       registerPlayerSocket(playerId, socket.id, engine.getRoomId());
       socket.join(engine.getRoomId());
+
+      await upsertPlayerConnection({
+        playerId,
+        sessionId: engine.getRoomId(),
+        socketId: socket.id,
+        displayName: parsed.data.displayName,
+      });
 
       io.to(engine.getRoomId()).emit("room:player_joined", { state: engine.getPublicState() });
       ack?.({ ok: true, roomId: engine.getRoomId(), playerId, state: engine.getPublicState() });
@@ -201,7 +216,7 @@ export function registerSocketHandlers(io: Server) {
     });
 
     // ---- player:reconnect (reconnexion explicite avec playerId connu, ex: après refresh) ----
-    socket.on("player:reconnect", (payload, ack) => {
+    socket.on("player:reconnect", async (payload, ack) => {
       const parsed = reconnectSchema.safeParse(payload);
       if (!parsed.success) return ack?.({ ok: false, error: "INVALID_PAYLOAD" });
 
@@ -213,6 +228,14 @@ export function registerSocketHandlers(io: Server) {
 
       registerPlayerSocket(parsed.data.playerId, socket.id, engine.getRoomId());
       socket.join(engine.getRoomId());
+
+      const p = engine.getPlayers().find((pl) => pl.id === parsed.data.playerId);
+      await upsertPlayerConnection({
+        playerId: parsed.data.playerId,
+        sessionId: engine.getRoomId(),
+        socketId: socket.id,
+        displayName: p?.displayName ?? "Joueur",
+      });
 
       io.to(engine.getRoomId()).emit("player:reconnect", { playerId: parsed.data.playerId, state: engine.getPublicState() });
       // Renvoie l'état complet pour que le client resynchronise (question, score...)
@@ -243,6 +266,7 @@ export function registerSocketHandlers(io: Server) {
       });
 
       socketPlayerIndex.delete(socket.id);
+      markPlayerDisconnected(ctx.playerId);
       // NB: on garde playerSocketIndex pour permettre reconnectPlayer() de le retrouver si besoin.
     });
 

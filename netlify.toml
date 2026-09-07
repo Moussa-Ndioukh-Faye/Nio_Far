@@ -1,0 +1,11 @@
+# Déploiement Netlify : le frontend React (Vite).
+# IMPORTANT : le backend Socket.IO doit tourner ailleurs (Render, Railway ou VPS)
+# car Netlify ne supporte pas les connexions WebSocket persistantes.
+#
+# À définir dans les env vars Netlify (Site settings > Environment) :
+#   VITE_SERVER_URL=https://ton-server.example.com   (avec les WEBSOCKETS activés)
+
+[build]
+  base = "client"
+  command = "npm run build"
+  publish = "dist"
