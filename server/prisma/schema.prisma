@@ -1,0 +1,150 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum GameType {
+  GUESS_ME       // "À quel point tu me connais ?"
+  COUPLE_BATTLE
+  TRUTH_OR_DARE
+}
+
+enum SessionStatus {
+  WAITING
+  READY
+  PLAYING
+  REVEALING
+  FINISHED
+  ABANDONED
+}
+
+enum ChallengeType {
+  TRUTH
+  DARE
+}
+
+// Optionnel pour le MVP (pas de compte obligatoire), prévu pour plus tard.
+model User {
+  id        String   @id @default(cuid())
+  email     String?  @unique
+  name      String?
+  createdAt DateTime @default(now())
+  players   Player[]
+}
+
+model GameSession {
+  id             String        @id @default(cuid())
+  code           String        @unique // ex: NF-82K7
+  gameType       GameType
+  status         SessionStatus @default(WAITING)
+  hostPlayerId   String?
+  currentQuestionIndex Int     @default(0)
+  questionOrder  String[]      // ids de questions/challenges dans l'ordre servi à cette session
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+  expiresAt      DateTime      // parties abandonnées nettoyées après expiration
+
+  players     Player[]
+  answers     Answer[]
+  results     GameResult[]
+  chatMessages ChatMessage[]
+  events      GameEvent[]
+
+  @@index([code])
+  @@index([status])
+}
+
+model Player {
+  id            String   @id @default(cuid())
+  displayName   String
+  sessionId     String
+  session       GameSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  userId        String?
+  user          User?    @relation(fields: [userId], references: [id])
+  socketId      String?
+  isConnected   Boolean  @default(true)
+  isReady       Boolean  @default(false)
+  score         Int      @default(0)
+  joinedAt      DateTime @default(now())
+  lastSeenAt    DateTime @default(now())
+
+  answers       Answer[]
+  chatMessages  ChatMessage[]
+
+  @@index([sessionId])
+  @@unique([sessionId, socketId])
+}
+
+model Question {
+  id        String   @id @default(cuid())
+  gameType  GameType
+  prompt    String
+  options   String[] // vide pour "Couple Battle" (MOI / MON PARTENAIRE) — géré côté logique
+  createdAt DateTime @default(now())
+
+  answers   Answer[]
+}
+
+model Challenge {
+  id        String        @id @default(cuid())
+  type      ChallengeType
+  text      String
+  createdAt DateTime      @default(now())
+}
+
+model Answer {
+  id          String   @id @default(cuid())
+  sessionId   String
+  session     GameSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  playerId    String
+  player      Player   @relation(fields: [playerId], references: [id], onDelete: Cascade)
+  questionId  String?
+  question    Question? @relation(fields: [questionId], references: [id])
+  questionIndex Int    // position dans questionOrder, pour retrouver la question sans dépendre uniquement de questionId
+  value       String   // réponse brute (option choisie, "MOI"/"MON PARTENAIRE", etc.)
+  submittedAt DateTime @default(now())
+
+  @@unique([sessionId, playerId, questionIndex])
+  @@index([sessionId, questionIndex])
+}
+
+model GameResult {
+  id              String   @id @default(cuid())
+  sessionId       String
+  session         GameSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  coupleScorePct  Int      // ex: 87
+  player1Score    Int
+  player2Score    Int
+  matchingAnswers Int
+  differentAnswers Int
+  bestStreak      Int
+  createdAt       DateTime @default(now())
+}
+
+model ChatMessage {
+  id        String   @id @default(cuid())
+  sessionId String
+  session   GameSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  playerId  String
+  player    Player   @relation(fields: [playerId], references: [id], onDelete: Cascade)
+  text      String
+  createdAt DateTime @default(now())
+
+  @@index([sessionId])
+}
+
+// Log d'audit de tous les événements serveur-autoritaires (anti-triche, debug, reconnexion)
+model GameEvent {
+  id        String   @id @default(cuid())
+  sessionId String
+  session   GameSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  type      String   // ex: "ROOM_CREATED", "ANSWER_SUBMITTED", "REVEAL", "PLAYER_DISCONNECTED"
+  payload   Json?
+  createdAt DateTime @default(now())
+
+  @@index([sessionId, createdAt])
+}
