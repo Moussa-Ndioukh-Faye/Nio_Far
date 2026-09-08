@@ -6,19 +6,12 @@ Plateforme de jeux multijoueurs en temps réel pour couples à distance.
 Chaque joueur se connecte depuis son propre appareil ; le serveur est la
 seule source de vérité (scores, réponses, état de partie).
 
-Ce scaffold couvre les **Phases 1 à 4** du plan de développement :
+**24 jeux jouables**, répartis en 7 catégories, avec un moteur de jeu
+générique (2 familles de règles : STANDARD et TURN_BASED), du contenu
+seedé par niveau (SOFT/NORMAL/INTENSE), favoris et historique par
+appareil, et multijoueur à distance via Socket.IO.
 
-1. Architecture + configuration du monorepo
-2. PostgreSQL + Prisma (schéma, migrations, seed)
-3. Système de rooms (GameEngine + RoomManager)
-4. Serveur Socket.IO (événements temps réel)
-
-Le client React fourni est un squelette minimal qui permet de **tester
-la connexion de deux navigateurs différents** (Phase 5) : créer une
-partie, rejoindre avec un code, voir la présence en ligne. Les 3 mini-jeux
-(Phases 7-9), le chat riche, les animations Framer Motion et l'UI premium
-(Phases 10-12) sont à construire par-dessus cette base — la structure est
-prévue pour ça (voir "Prochaines étapes" plus bas).
+Pour ajouter un jeu : voir **GAMES.md** (guide en 5 étapes).
 
 ## Structure du projet
 
