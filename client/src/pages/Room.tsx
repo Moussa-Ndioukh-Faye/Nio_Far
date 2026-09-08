@@ -5,34 +5,32 @@ import { useGame } from "../contexts/GameContext";
 import { Mark } from "../components/Mark";
 import { PresenceBadge } from "../components/PresenceBadge";
 import { InviteShare } from "../components/InviteShare";
+import { getGameComponent } from "../games/registry";
+import { getCatalogEntry } from "../data/catalog";
+import { FinishedView } from "../types";
 
 export function Room() {
   const {
-    roomState,
+    state,
     playerId,
-    currentQuestion,
-    lastReveal,
+    messages,
     partnerStatus,
-    finalResult,
+    resetSession,
     setReady,
     startGame,
-    submitAnswer,
-    nextQuestion,
+    act,
+    next,
     sendChat,
-    messages,
-    resetSession,
   } = useGame();
   const navigate = useNavigate();
   const [chatText, setChatText] = useState("");
-  const [answered, setAnswered] = useState(false);
   const chatEndRef = useRef<HTMLDivElement>(null);
-  const scrollToBottom = () => chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
 
   useEffect(() => {
-    scrollToBottom();
+    chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages.length]);
 
-  if (!roomState) {
+  if (!state) {
     return (
       <div className="flex min-h-screen items-center justify-center gap-3 p-8 text-center text-neutral-400">
         <span className="h-5 w-5 animate-spin rounded-full border-2 border-saffron border-t-transparent" />
@@ -41,13 +39,17 @@ export function Room() {
     );
   }
 
-  const me = roomState.players.find((p) => p.id === playerId);
-  const partner = roomState.players.find((p) => p.id !== playerId);
-  const inviteLink = `${window.location.origin}/room/${roomState.code}`;
+  const { meta, view } = state;
+  const me = meta.players.find((p) => p.id === playerId);
+  const partner = meta.players.find((p) => p.id !== playerId);
+  const inviteLink = `${window.location.origin}/room/${meta.code}`;
+  const catalog = getCatalogEntry(meta.gameType);
 
-  if (finalResult) {
-    const p1 = roomState.players[0];
-    const p2 = roomState.players[1];
+  // ---- Finished ----
+  if (meta.status === "FINISHED" && view?.kind === "FINISHED") {
+    const result = (view as FinishedView).result;
+    const p1 = meta.players[0];
+    const p2 = meta.players[1];
     return (
       <div className="mx-auto flex min-h-screen w-full max-w-md flex-col justify-center px-6 py-10">
         <motion.div
@@ -57,42 +59,30 @@ export function Room() {
           className="card flex flex-col items-center gap-5 p-8 text-center"
         >
           <Mark size={56} />
-          <h1 className="font-display text-3xl font-black text-paper">
-            {finalResult.abandoned ? "Partie interrompue" : "Partie terminée"}
-          </h1>
-          {finalResult.abandoned ? (
-            <p className="text-sm leading-relaxed text-sand">
-              {finalResult.reason === "PARTNER_DISCONNECTED"
-                ? "Ton/ta partenaire s'est déconnecté(e) trop longtemps."
-                : "La partie a été interrompue."}
+          <h1 className="font-display text-3xl font-black text-paper">Partie terminée</h1>
+          <p className="text-sm text-sand">{catalog?.name ?? meta.gameType}</p>
+          <div>
+            <p className="font-display text-7xl font-black text-clay">
+              {result.coupleScorePct}
+              <span className="text-4xl text-saffron">%</span>
             </p>
-          ) : (
-            <>
-              <div>
-                <p className="font-display text-7xl font-black text-clay">
-                  {finalResult.coupleScorePct}
-                  <span className="text-4xl text-saffron">%</span>
-                </p>
-                <p className="mt-1 font-display italic text-sand">de complicité entre vous deux</p>
-              </div>
-              <div className="flex w-full justify-between rounded-2xl border border-line bg-ink/50 px-5 py-4">
-                <div>
-                  <p className="text-xs uppercase tracking-widest text-mute">{p1?.displayName ?? "Joueur 1"}</p>
-                  <p className="font-display text-3xl font-bold text-paper">{finalResult.player1Score}</p>
-                </div>
-                <div className="text-right">
-                  <p className="text-xs uppercase tracking-widest text-mute">{p2?.displayName ?? "Joueur 2"}</p>
-                  <p className="font-display text-3xl font-bold text-paper">{finalResult.player2Score}</p>
-                </div>
-              </div>
-            </>
+            <p className="mt-1 font-display italic text-sand">de complicité entre vous deux</p>
+          </div>
+          <div className="flex w-full justify-between rounded-2xl border border-line bg-ink/50 px-5 py-4">
+            <div>
+              <p className="text-xs uppercase tracking-widest text-mute">{p1?.displayName ?? "Joueur 1"}</p>
+              <p className="font-display text-3xl font-bold text-paper">{result.player1Score}</p>
+            </div>
+            <div className="text-right">
+              <p className="text-xs uppercase tracking-widest text-mute">{p2?.displayName ?? "Joueur 2"}</p>
+              <p className="font-display text-3xl font-bold text-paper">{result.player2Score}</p>
+            </div>
+          </div>
+          {result.summaryLabel && (
+            <p className="text-sm italic text-sand">{result.summaryLabel}</p>
           )}
-
           <button
-            onClick={() => {
-              resetSession();
-              navigate("/");
-            }}
+            onClick={() => { resetSession(); navigate("/"); }}
             className="btn-clay w-full py-3.5 text-lg"
           >
             Rejouer
@@ -102,13 +92,9 @@ export function Room() {
     );
   }
 
-  function handleAnswer(value: string) {
-    submitAnswer(value);
-    setAnswered(true);
-  }
-
-  return (
-    <div className="mx-auto flex min-h-screen w-full max-w-md flex-col px-4 py-6">
+  // ---- Header ----
+  function Header() {
+    return (
       <header className="mb-6 flex items-center justify-between gap-3">
         <div className="flex items-center gap-3">
           <Mark size={38} />
@@ -116,19 +102,73 @@ export function Room() {
             <h1 className="font-display text-xl font-black leading-none text-paper">
               NIO <span className="italic text-clay">FAR</span>
             </h1>
-            <p className="mt-0.5 text-[0.65rem] uppercase tracking-[0.24em] text-mute">{roomState.gameType.replace(/_/g, " ")}</p>
+            <p className="mt-0.5 text-[0.65rem] uppercase tracking-[0.24em] text-mute">
+              {catalog?.name ?? meta.gameType.replace(/_/g, " ")}
+            </p>
           </div>
         </div>
         <div className="flex flex-col items-end gap-1">
           <span className="text-[0.65rem] uppercase tracking-[0.24em] text-mute">Code</span>
           <span className="rounded-lg border border-saffron/40 bg-saffron/10 px-2.5 py-1 font-display text-base font-bold tracking-[0.18em] text-saffron">
-            {roomState.code}
+            {meta.code}
           </span>
         </div>
       </header>
+    );
+  }
+
+  // ---- Waiting / Ready ----
+  function WaitingCard() {
+    if (meta.status === "WAITING" && !partner) {
+      return (
+        <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="flex flex-col gap-4">
+          <p className="text-center font-display italic text-sand">En attendant que ton/ta partenaire arrive…</p>
+          <InviteShare code={meta.code} link={inviteLink} />
+        </motion.div>
+      );
+    }
+
+    if (partner && (meta.status === "WAITING" || meta.status === "READY")) {
+      return (
+        <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="card flex flex-col items-center gap-4 p-6 text-center">
+          <p className="font-display text-2xl font-black text-paper">💞 Boucle bouclée</p>
+          <p className="text-sm text-sand">Vous êtes tous les deux là. Prêt·e à tout se dire ?</p>
+          {!me?.isReady ? (
+            <button onClick={() => setReady(true)} className="btn-clay w-full py-3.5">
+              Je suis prêt(e)
+            </button>
+          ) : (
+            <div className="flex w-full flex-col items-center gap-3">
+              <span className="inline-flex items-center gap-2 rounded-full border border-leaf/50 bg-leaf/15 px-4 py-1.5 text-sm font-semibold text-leaf">
+                <span className="h-2 w-2 animate-pulse-soft rounded-full bg-leaf" />
+                Prêt(e)
+              </span>
+              {meta.status === "READY" && me?.id === meta.hostId && (
+                <button onClick={startGame} className="btn w-full border border-clay bg-clay/15 py-3.5 text-clay hover:bg-clay/25">
+                  Commencer la partie
+                </button>
+              )}
+              {meta.status === "READY" && me?.id !== meta.hostId && (
+                <p className="text-xs text-mute">{partner.displayName} lance quand tout est prêt…</p>
+              )}
+            </div>
+          )}
+        </motion.div>
+      );
+    }
+
+    return null;
+  }
+
+  // ---- Game view (via registry) ----
+  const GameView = meta.family ? getGameComponent(meta.family) : null;
+
+  return (
+    <div className="mx-auto flex min-h-screen w-full max-w-md flex-col px-4 py-6">
+      <Header />
 
       <div className="mb-4 flex gap-2.5">
-        <PresenceBadge name={me?.displayName ?? "Moi"} isConnected={true} isHost={me?.id === roomState.hostId} score={me?.score} />
+        <PresenceBadge name={me?.displayName ?? "Moi"} isConnected={true} isHost={me?.id === meta.hostId} score={me?.score} />
         <PresenceBadge
           name={partner?.displayName ?? "En attente…"}
           isConnected={partner?.isConnected ?? false}
@@ -150,132 +190,13 @@ export function Room() {
         )}
       </AnimatePresence>
 
-      {roomState.status === "WAITING" && !partner && (
-        <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="flex flex-col gap-4">
-          <p className="text-center font-display italic text-sand">En attendant que ton/ta partenaire arrive…</p>
-          <InviteShare code={roomState.code} link={inviteLink} />
-        </motion.div>
+      {(meta.status === "WAITING" || meta.status === "READY") && <WaitingCard />}
+
+      {meta.status === "PLAYING" && GameView && (
+        <GameView state={state} playerId={playerId} act={act} next={next} />
       )}
 
-      {partner && (roomState.status === "WAITING" || roomState.status === "READY") && (
-        <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="card flex flex-col items-center gap-4 p-6 text-center">
-          <p className="font-display text-2xl font-black text-paper">💞 Boucle bouclée</p>
-          <p className="text-sm text-sand">Vous êtes tous les deux là. Prêt·e à tout se dire ?</p>
-
-          {!me?.isReady ? (
-            <button onClick={() => setReady(true)} className="btn-clay w-full py-3.5">
-              Je suis prêt(e)
-            </button>
-          ) : (
-            <div className="flex w-full flex-col items-center gap-3">
-              <span className="inline-flex items-center gap-2 rounded-full border border-leaf/50 bg-leaf/15 px-4 py-1.5 text-sm font-semibold text-leaf">
-                <span className="h-2 w-2 animate-pulse-soft rounded-full bg-leaf" />
-                Prêt(e)
-              </span>
-              {roomState.status === "READY" && me?.id === roomState.hostId && (
-                <button onClick={startGame} className="btn w-full border border-clay bg-clay/15 py-3.5 text-clay hover:bg-clay/25">
-                  Commencer la partie
-                </button>
-              )}
-              {roomState.status === "READY" && me?.id !== roomState.hostId && (
-                <p className="text-xs text-mute">{partner.displayName} lance quand tout est prêt…</p>
-              )}
-            </div>
-          )}
-        </motion.div>
-      )}
-
-      {roomState.status === "PLAYING" && currentQuestion && (
-        <AnimatePresence mode="wait">
-          <motion.div
-            key={currentQuestion.id}
-            initial={{ opacity: 0, y: 18, scale: 0.98 }}
-            animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, y: -14, scale: 0.98 }}
-            transition={{ duration: 0.4, ease: [0.22, 1, 0.36, 1] }}
-            className="card flex flex-col gap-4 p-6"
-          >
-            <div className="flex items-center justify-between">
-              <span className="eyebrow">Question</span>
-              <span className="rounded-full border border-line bg-ink/60 px-2.5 py-0.5 font-display text-sm font-bold text-saffron">
-                {currentQuestion.index + 1}/{currentQuestion.total}
-              </span>
-            </div>
-            <h2 className="font-display text-2xl font-bold leading-snug text-paper">{currentQuestion.prompt}</h2>
-
-            <div className="flex flex-col gap-2.5">
-              {currentQuestion.options.map((opt, i) => (
-                <motion.button
-                  key={opt}
-                  initial={{ opacity: 0, x: -8 }}
-                  animate={{ opacity: 1, x: 0 }}
-                  transition={{ delay: 0.06 * i }}
-                  disabled={answered}
-                  onClick={() => handleAnswer(opt)}
-                  className="group flex items-center gap-3 rounded-2xl border border-line bg-ink/40 px-4 py-3.5 text-left transition duration-200 hover:border-clay/60 hover:bg-ink3 disabled:opacity-40 disabled:hover:border-line disabled:hover:bg-ink/40"
-                >
-                  <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-ink3 font-display text-sm font-bold text-mute transition group-hover:bg-clay group-hover:text-paper">
-                    {i + 1}
-                  </span>
-                  <span className="text-sm font-medium text-paper">{opt}</span>
-                </motion.button>
-              ))}
-            </div>
-
-            {answered && (
-              <motion.p initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="flex items-center justify-center gap-2 text-sm text-mute">
-                <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-sand border-t-transparent" />
-                En attente de la réponse de {partner?.displayName ?? "ton/ta partenaire"}…
-              </motion.p>
-            )}
-          </motion.div>
-        </AnimatePresence>
-      )}
-
-      <AnimatePresence>
-        {lastReveal && (
-          <motion.div
-            initial={{ opacity: 0, scale: 0.7, rotate: -3 }}
-            animate={{ opacity: 1, scale: 1, rotate: 0 }}
-            exit={{ opacity: 0, scale: 0.95 }}
-            transition={{ type: "spring", stiffness: 260, damping: 18 }}
-            className={`card mt-4 p-5 ${lastReveal.isMatch ? "shadow-stamp" : ""}`}
-          >
-            <div className="flex flex-col gap-2.5">
-              {Object.entries(lastReveal.answers).map(([pid, val]) => {
-                const p = roomState.players.find((pl) => pl.id === pid);
-                return (
-                  <div key={pid} className="flex items-center justify-between gap-3">
-                    <span className="text-xs uppercase tracking-widest text-mute">{p?.displayName ?? "Joueur"}</span>
-                    <span className="rounded-xl border border-line bg-ink/50 px-3 py-1.5 text-sm font-semibold text-paper">{val}</span>
-                  </div>
-                );
-              })}
-            </div>
-
-            <div
-              className={`my-4 border-t border-dashed pt-4 text-center ${
-                lastReveal.isMatch ? "border-leaf/40" : "border-bissap/40"
-              }`}
-            >
-              <p className={`font-display text-xl font-black tracking-wide ${lastReveal.isMatch ? "text-leaf" : "text-bissap"}`}>
-                {lastReveal.isMatch ? "Même réponse" : "Réponses différentes"}
-              </p>
-            </div>
-
-            <button
-              onClick={() => {
-                setAnswered(false);
-                nextQuestion();
-              }}
-              className="btn-clay w-full py-3"
-            >
-              Question suivante
-            </button>
-          </motion.div>
-        )}
-      </AnimatePresence>
-
+      {/* ---- Chat ---- */}
       <section className="mt-7 flex flex-col gap-3">
         <h3 className="eyebrow">Chat · murmures</h3>
         <div className="card flex h-44 flex-col overflow-hidden p-3">
@@ -283,7 +204,7 @@ export function Room() {
             className="flex flex-1 flex-col gap-2 overflow-y-auto pr-1"
             onScroll={(e) => {
               const el = e.currentTarget;
-              if (el.scrollTop + el.clientHeight >= el.scrollHeight - 12) scrollToBottom();
+              if (el.scrollTop + el.clientHeight >= el.scrollHeight - 12) chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
             }}
           >
             {messages.length === 0 && (
@@ -291,15 +212,11 @@ export function Room() {
             )}
             {messages.map((m, i) => {
               const mine = m.playerId === playerId;
-              const from = roomState.players.find((pl) => pl.id === m.playerId);
+              const from = meta.players.find((pl) => pl.id === m.playerId);
               return (
                 <div key={i} className={`flex flex-col ${mine ? "items-end" : "items-start"}`}>
                   <span className="mb-0.5 px-1 text-[0.6rem] uppercase tracking-widest text-mute">{mine ? "toi" : from?.displayName ?? "?"}</span>
-                  <p
-                    className={`max-w-[85%] rounded-2xl px-3 py-2 text-sm ${
-                      mine ? "rounded-br-sm bg-clay text-paper" : "rounded-bl-sm bg-ink3 text-paper"
-                    }`}
-                  >
+                  <p className={`max-w-[85%] rounded-2xl px-3 py-2 text-sm ${mine ? "rounded-br-sm bg-clay text-paper" : "rounded-bl-sm bg-ink3 text-paper"}`}>
                     {m.text}
                   </p>
                 </div>

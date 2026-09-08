@@ -1,58 +1,117 @@
-import { GameType, PlayerState, QuestionPayload, RoomState, SessionStatus } from "../types";
+import { Category, Difficulty, GameFamily, GameMeta, GameType, PlayerState, RoomResultSummary, SessionPublicState, SessionStatus } from "../types";
+import { ActionResult, DeckCard, Ruleset, RulesetHost } from "./rules";
 
 const MAX_PLAYERS = 2;
-const RECONNECT_GRACE_MS = 60_000; // 60s avant d'abandonner la partie (règle 5 & 24)
-
-export interface ContentItem {
-  id: string;
-  prompt: string;
-  options: string[];
-}
+const RECONNECT_GRACE_MS = 60_000;
 
 /**
- * GameEngine : logique pure d'une partie (une instance = une room).
- * Ne connaît rien de Socket.IO ni de React — testable unitairement.
- * Le serveur (socket layer) est le seul appelant ; le client n'a jamais
- * un accès direct à cette classe.
+ * GameEngine : hôte de partie unique, indépendant de la mécanique.
+ * Une instance = une room. Il gère joueurs, statuts et scores, et délègue
+ * le déroulé de manche à la Règle (StandardRules / TurnBasedRules).
+ * Purement synchrone — la couche socket lit getPublicState() et diffuse.
  */
-export class GameEngine {
-  private state: RoomState;
-  private questions: ContentItem[];
+export class GameEngine implements RulesetHost {
+  private meta: GameMeta;
+  private rules: Ruleset;
+  private deck: DeckCard[];
   private disconnectTimers: Map<string, NodeJS.Timeout> = new Map();
 
   constructor(params: {
     roomId: string;
     code: string;
     gameType: GameType;
+    category: Category;
+    difficulty: Difficulty;
+    gameName: string;
+    family: GameFamily;
+    scoringEnabled: boolean;
+    totalRounds: number;
     hostId: string;
-    questions: ContentItem[];
+    deck: DeckCard[];
+    buildRules: (host: RulesetHost) => Ruleset;
   }) {
-    this.questions = params.questions;
-    this.state = {
+    this.deck = params.deck;
+    this.meta = {
       roomId: params.roomId,
       code: params.code,
       gameType: params.gameType,
+      category: params.category,
+      difficulty: params.difficulty,
+      gameName: params.gameName,
+      family: params.family,
+      scoringEnabled: params.scoringEnabled,
+      totalRounds: params.totalRounds,
+      currentRound: 0,
+      turnPlayerId: null,
       hostId: params.hostId,
       players: [],
-      currentQuestionIndex: 0,
       status: "WAITING",
       scores: {},
       createdAt: Date.now(),
-      pendingAnswers: {},
     };
+    this.rules = params.buildRules(this);
+    this.rules.loadDeck(params.deck);
+    // Adapter totalRounds à la taille réelle du deck pour éviter les erreurs de fin prématurée.
+    if (params.family === "STANDARD") {
+      this.meta.totalRounds = Math.min(params.totalRounds, params.deck.length);
+    }
+  }
+
+  // ---- Implémentation RulesetHost ----
+
+  get players(): PlayerState[] {
+    return this.meta.players;
+  }
+
+  get scores(): Record<string, number> {
+    return this.meta.scores;
+  }
+
+  get scoringEnabled(): boolean {
+    return this.meta.scoringEnabled;
+  }
+
+  get totalRounds(): number {
+    return this.meta.totalRounds;
+  }
+
+  get gameType(): GameType {
+    return this.meta.gameType;
+  }
+
+  get round(): number {
+    return this.meta.currentRound;
+  }
+
+  set round(value: number) {
+    this.meta.currentRound = value;
+  }
+
+  get turnPlayerId(): string | null {
+    return this.meta.turnPlayerId;
+  }
+
+  set turnPlayerId(value: string | null) {
+    this.meta.turnPlayerId = value;
+  }
+
+  addScore(playerId: string, delta: number) {
+    const p = this.meta.players.find((pl) => pl.id === playerId);
+    if (!p) return;
+    p.score += delta;
+    this.meta.scores[playerId] = (this.meta.scores[playerId] ?? 0) + delta;
   }
 
   // ---- Joueurs ----
 
   addPlayer(player: { id: string; displayName: string; socketId: string }): { ok: true } | { ok: false; reason: string } {
-    if (this.state.players.find((p) => p.id === player.id)) {
-      // reconnexion logique gérée par reconnectPlayer(), pas ici
+    if (this.meta.players.find((p) => p.id === player.id)) {
       return { ok: false, reason: "PLAYER_ALREADY_IN_ROOM" };
     }
-    if (this.state.players.length >= MAX_PLAYERS) {
+    if (this.meta.players.length >= MAX_PLAYERS) {
       return { ok: false, reason: "ROOM_FULL" };
     }
-    this.state.players.push({
+    this.meta.players.push({
       id: player.id,
       displayName: player.displayName,
       socketId: player.socketId,
@@ -60,34 +119,36 @@ export class GameEngine {
       isReady: false,
       score: 0,
     });
-    this.state.scores[player.id] = 0;
+    this.meta.scores[player.id] = 0;
     return { ok: true };
   }
 
   removePlayer(playerId: string) {
-    this.state.players = this.state.players.filter((p) => p.id !== playerId);
+    this.meta.players = this.meta.players.filter((p) => p.id !== playerId);
+    delete this.meta.scores[playerId];
     this.clearDisconnectTimer(playerId);
   }
 
   setPlayerReady(playerId: string, ready: boolean) {
-    const p = this.state.players.find((pl) => pl.id === playerId);
+    const p = this.meta.players.find((pl) => pl.id === playerId);
     if (p) p.isReady = ready;
-    if (this.state.players.length === MAX_PLAYERS && this.state.players.every((pl) => pl.isReady)) {
-      this.state.status = "READY";
+    if (this.meta.players.length === MAX_PLAYERS && this.meta.players.every((pl) => pl.isReady)) {
+      this.meta.status = "READY";
+    } else if (this.meta.status === "READY") {
+      this.meta.status = "WAITING";
     }
   }
 
   markDisconnected(playerId: string, onTimeout: () => void) {
-    const p = this.state.players.find((pl) => pl.id === playerId);
+    const p = this.meta.players.find((pl) => pl.id === playerId);
     if (!p) return;
     p.isConnected = false;
     p.socketId = null;
     this.clearDisconnectTimer(playerId);
     const timer = setTimeout(() => {
-      // Toujours déconnecté après le délai de grâce -> abandon
-      const stillGone = this.state.players.find((pl) => pl.id === playerId && !pl.isConnected);
+      const stillGone = this.meta.players.find((pl) => pl.id === playerId && !pl.isConnected);
       if (stillGone) {
-        this.state.status = "ABANDONED";
+        this.meta.status = "ABANDONED";
         onTimeout();
       }
     }, RECONNECT_GRACE_MS);
@@ -95,7 +156,7 @@ export class GameEngine {
   }
 
   reconnectPlayer(playerId: string, newSocketId: string): boolean {
-    const p = this.state.players.find((pl) => pl.id === playerId);
+    const p = this.meta.players.find((pl) => pl.id === playerId);
     if (!p) return false;
     p.isConnected = true;
     p.socketId = newSocketId;
@@ -111,133 +172,80 @@ export class GameEngine {
     }
   }
 
-  // ---- Déroulé de partie ----
+  // ---- Déroulé ----
 
   canStart(): boolean {
     return (
-      this.state.players.length === MAX_PLAYERS &&
-      this.state.players.every((p) => p.isReady) &&
-      this.state.status === "READY"
+      this.meta.players.length === MAX_PLAYERS &&
+      this.meta.players.every((p) => p.isReady) &&
+      this.meta.status === "READY"
     );
   }
 
-  start() {
-    if (!this.canStart()) throw new Error("CANNOT_START");
-    this.state.status = "PLAYING";
-    this.state.currentQuestionIndex = 0;
-    this.state.pendingAnswers = {};
+  start(): ActionResult {
+    if (!this.canStart()) return { ok: false, error: "NOT_READY" };
+    this.meta.status = "PLAYING";
+    return this.rules.start();
   }
 
-  /** Question actuelle, formatée pour le client (jamais la réponse correcte / celle du partenaire). */
-  getCurrentQuestionForClient(): QuestionPayload | null {
-    const q = this.questions[this.state.currentQuestionIndex];
-    if (!q) return null;
+  /** Action générique du ruleset (ex: answer, choose, resolve). */
+  act(playerId: string, action: string, payload: unknown): ActionResult {
+    if (this.meta.status !== "PLAYING") return { ok: false, error: "NOT_PLAYING" };
+    return this.rules.act(playerId, action, payload);
+  }
+
+  /** Progression (question suivante, tour suivant…). */
+  next(playerId: string): ActionResult {
+    if (this.meta.status !== "PLAYING") return { ok: false, error: "NOT_PLAYING" };
+    const res = this.rules.next(playerId);
+    if (res.ok && this.rules.isFinished()) {
+      this.meta.status = "FINISHED";
+    }
+    return res;
+  }
+
+  // ---- État public ----
+
+  getPublicState(): SessionPublicState {
     return {
-      id: q.id,
-      prompt: q.prompt,
-      options: q.options,
-      index: this.state.currentQuestionIndex,
-      total: this.questions.length,
-    };
-  }
-
-  /**
-   * Enregistre la réponse d'un joueur. Rejette une double réponse
-   * (règle anti-triche #24.8). Retourne si les deux ont répondu.
-   */
-  submitAnswer(playerId: string, value: string): { ok: boolean; reason?: string; bothAnswered?: boolean } {
-    if (this.state.status !== "PLAYING") return { ok: false, reason: "NOT_PLAYING" };
-    if (this.state.pendingAnswers[playerId]) return { ok: false, reason: "ALREADY_ANSWERED" };
-    this.state.pendingAnswers[playerId] = { playerId, value, submittedAt: Date.now() };
-
-    const bothAnswered = this.state.players.every((p) => this.state.pendingAnswers[p.id]);
-    if (bothAnswered) this.state.status = "REVEALING";
-    return { ok: true, bothAnswered };
-  }
-
-  /** Calcule et applique les points, retourne les réponses à révéler simultanément. */
-  reveal(): {
-    answers: Record<string, string>;
-    isMatch: boolean;
-    scoreDelta: Record<string, number>;
-  } {
-    const answers: Record<string, string> = {};
-    for (const [playerId, rec] of Object.entries(this.state.pendingAnswers)) {
-      answers[playerId] = rec.value;
-    }
-    const values = Object.values(answers);
-    const isMatch = values.length === MAX_PLAYERS && values[0] === values[1];
-
-    const scoreDelta: Record<string, number> = {};
-    for (const p of this.state.players) scoreDelta[p.id] = 0;
-
-    if (this.state.gameType === "COUPLE_BATTLE" && !isMatch) {
-      // Pas de "bonne" réponse objective : on ne score pas automatiquement
-      // ici (dépend du consensus du couple côté UI) — laissé à 0 par défaut,
-      // extensible selon les règles précises du jeu.
-    } else if (isMatch) {
-      for (const p of this.state.players) scoreDelta[p.id] = 10;
-    }
-
-    for (const p of this.state.players) {
-      p.score += scoreDelta[p.id] ?? 0;
-      this.state.scores[p.id] = p.score;
-    }
-
-    return { answers, isMatch, scoreDelta };
-  }
-
-  nextQuestion(): { finished: boolean } {
-    this.state.pendingAnswers = {};
-    this.state.currentQuestionIndex += 1;
-    if (this.state.currentQuestionIndex >= this.questions.length) {
-      this.state.status = "FINISHED";
-      return { finished: true };
-    }
-    this.state.status = "PLAYING";
-    return { finished: false };
-  }
-
-  getFinalResult() {
-    const [p1, p2] = this.state.players;
-    const total = (p1?.score ?? 0) + (p2?.score ?? 0);
-    const maxPossible = this.questions.length * 10 * MAX_PLAYERS || 1;
-    const coupleScorePct = Math.round((total / maxPossible) * 100);
-    return {
-      coupleScorePct: Math.min(100, coupleScorePct),
-      player1Score: p1?.score ?? 0,
-      player2Score: p2?.score ?? 0,
-    };
-  }
-
-  // ---- Accès à l'état public (jamais pendingAnswers de l'autre joueur) ----
-
-  getPublicState() {
-    const { pendingAnswers, ...rest } = this.state;
-    return {
-      ...rest,
-      // le client sait seulement QUI a déjà répondu, pas la valeur
-      answeredPlayerIds: Object.keys(pendingAnswers),
+      meta: { ...this.meta, players: this.meta.players.map((p) => ({ ...p })) },
+      view: this.rules.getView(),
     };
   }
 
   getStatus(): SessionStatus {
-    return this.state.status;
+    return this.meta.status;
   }
 
   getPlayers(): PlayerState[] {
-    return this.state.players;
+    return this.meta.players;
   }
 
   getHostId(): string {
-    return this.state.hostId;
+    return this.meta.hostId;
   }
 
   getRoomId(): string {
-    return this.state.roomId;
+    return this.meta.roomId;
   }
 
   getCode(): string {
-    return this.state.code;
+    return this.meta.code;
+  }
+
+  getGameType(): GameType {
+    return this.meta.gameType;
+  }
+
+  getMetaData(): GameMeta {
+    return { ...this.meta };
+  }
+
+  getDeck(): DeckCard[] {
+    return this.deck;
+  }
+
+  getFinalResult(): RoomResultSummary {
+    return this.rules.getFinalResult();
   }
 }

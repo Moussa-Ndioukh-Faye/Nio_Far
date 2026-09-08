@@ -1,5 +1,8 @@
-import { GameEngine, ContentItem } from "./GameEngine";
-import { GameType } from "../types";
+import { Category, Difficulty, GameFamily, GameType } from "../types";
+import { getCatalogEntry } from "./catalog";
+import { GameEngine } from "./GameEngine";
+import { DeckCard } from "./rules";
+import { createRules } from "./rules/index";
 import { generateRoomCode } from "../utils/roomCode";
 import { logger } from "../utils/logger";
 
@@ -8,6 +11,13 @@ const ROOM_TTL_MS = 1000 * 60 * 60 * 6; // 6h — au-delà, une room inactive es
 interface RoomEntry {
   engine: GameEngine;
   lastActivityAt: number;
+}
+
+export interface CreateRoomOptions {
+  gameType: GameType;
+  difficulty: Difficulty;
+  hostId: string;
+  deck: DeckCard[];
 }
 
 /**
@@ -19,22 +29,31 @@ export class RoomManager {
   private rooms: Map<string, RoomEntry> = new Map(); // roomId -> entry
   private codeToRoomId: Map<string, string> = new Map(); // code -> roomId
 
-  createRoom(params: { gameType: GameType; hostId: string; questions: ContentItem[] }): GameEngine {
+  createRoom(params: CreateRoomOptions): GameEngine {
     let code = generateRoomCode();
     while (this.codeToRoomId.has(code)) code = generateRoomCode(); // évite collision
 
     const roomId = `room_${code}`;
+    const game = getCatalogEntry(params.gameType);
+    const cardTypes = game.cardType === "MIXED" ? [...game.options] : [game.cardType];
     const engine = new GameEngine({
       roomId,
       code,
       gameType: params.gameType,
+      category: game.category as Category,
+      difficulty: params.difficulty,
+      gameName: game.name,
+      family: game.family as GameFamily,
+      scoringEnabled: game.scoringEnabled,
+      totalRounds: game.roundsByDifficulty[params.difficulty],
       hostId: params.hostId,
-      questions: params.questions,
+      deck: params.deck,
+      buildRules: createRules(game.family as GameFamily, cardTypes),
     });
 
     this.rooms.set(roomId, { engine, lastActivityAt: Date.now() });
     this.codeToRoomId.set(code, roomId);
-    logger.info("Room créée", { roomId, code, gameType: params.gameType });
+    logger.info("Room créée", { roomId, code, gameType: params.gameType, difficulty: params.difficulty });
     return engine;
   }
 

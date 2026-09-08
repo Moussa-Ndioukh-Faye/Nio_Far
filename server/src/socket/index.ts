@@ -1,17 +1,12 @@
 import { Server, Socket } from "socket.io";
 import { nanoid } from "nanoid/non-secure";
 import { roomManager } from "../game-engine/RoomManager";
-import { loadContentForGame, prisma } from "../services/contentService";
+import { getCatalogEntry } from "../game-engine/catalog";
+import { loadDeckForGame, prisma } from "../services/contentService";
 import { upsertPlayerConnection, markPlayerDisconnected } from "../services/persistence";
 import { logger } from "../utils/logger";
 import { isSocketRateLimited, clearSocketRateLimit } from "../middleware/rateLimit";
-import {
-  createRoomSchema,
-  joinRoomSchema,
-  answerSubmitSchema,
-  chatMessageSchema,
-  reconnectSchema,
-} from "../middleware/validation";
+import { createRoomSchema, joinRoomSchema, chatMessageSchema, reconnectSchema, gameActSchema, gameNextSchema } from "../middleware/validation";
 
 // playerId <-> socket.id mapping pour retrouver un joueur lors d'une reconnexion
 const playerSocketIndex: Map<string, string> = new Map(); // playerId -> current socketId
@@ -27,26 +22,44 @@ export function registerSocketHandlers(io: Server) {
       const parsed = createRoomSchema.safeParse(payload);
       if (!parsed.success) return ack?.({ ok: false, error: "INVALID_PAYLOAD" });
 
+      const game = getCatalogEntry(parsed.data.gameType);
+      const totalRounds = game.roundsByDifficulty[parsed.data.difficulty];
+      const cardTypes = game.cardType === "MIXED" ? game.options.length : 1;
+      const deckCount = game.family === "TURN_BASED" ? totalRounds * cardTypes : totalRounds;
+
+      const deck = await loadDeckForGame({
+        gameType: parsed.data.gameType,
+        difficulty: parsed.data.difficulty,
+        count: deckCount,
+      });
+      if (deck.length < 1) return ack?.({ ok: false, error: "NO_CONTENT" });
+
       const playerId = nanoid();
-      const questions = await loadContentForGame(parsed.data.gameType);
       const engine = roomManager.createRoom({
         gameType: parsed.data.gameType,
+        difficulty: parsed.data.difficulty,
         hostId: playerId,
-        questions,
+        deck,
       });
-      engine.addPlayer({ id: playerId, displayName: parsed.data.displayName, socketId: socket.id });
+
+      const add = engine.addPlayer({ id: playerId, displayName: parsed.data.displayName, socketId: socket.id });
+      if (!add.ok) return ack?.({ ok: false, error: add.reason });
       registerPlayerSocket(playerId, socket.id, engine.getRoomId());
 
-      // Persistance (au minimum la création, pour audit / reprise)
+      // Persistance (au minimum la création, pour audit / reprise / historique)
       await prisma.gameSession
         .create({
           data: {
             id: engine.getRoomId(),
             code: engine.getCode(),
-            gameType: parsed.data.gameType,
+            gameType: engine.getGameType(),
+            category: engine.getMetaData().category,
+            difficulty: engine.getMetaData().difficulty,
+            scoringEnabled: engine.getMetaData().scoringEnabled,
+            totalRounds: engine.getMetaData().totalRounds,
             status: "WAITING",
             hostPlayerId: playerId,
-            questionOrder: questions.map((q) => q.id),
+            questionOrder: deck.map((c) => c.id),
             expiresAt: new Date(Date.now() + 1000 * 60 * 60 * 6),
           },
         })
@@ -57,6 +70,7 @@ export function registerSocketHandlers(io: Server) {
         sessionId: engine.getRoomId(),
         socketId: socket.id,
         displayName: parsed.data.displayName,
+        deviceId: parsed.data.deviceId,
       });
 
       socket.join(engine.getRoomId());
@@ -65,6 +79,7 @@ export function registerSocketHandlers(io: Server) {
         roomId: engine.getRoomId(),
         code: engine.getCode(),
         playerId,
+        gameName: game.name,
         state: engine.getPublicState(),
       });
     });
@@ -86,11 +101,12 @@ export function registerSocketHandlers(io: Server) {
       });
 
       if (!result.ok) {
-        // Cas #24.7 : troisième utilisateur essaie de rejoindre.
         if (result.reason === "ROOM_FULL") return ack?.({ ok: false, error: "ROOM_FULL" });
         if (result.reason === "PLAYER_ALREADY_IN_ROOM") {
-          // Cas #24.4 : refresh de page — traiter comme une reconnexion.
+          // Refresh de page — traiter comme une reconnexion.
           engine.reconnectPlayer(playerId, socket.id);
+        } else {
+          return ack?.({ ok: false, error: result.reason });
         }
       }
 
@@ -102,6 +118,7 @@ export function registerSocketHandlers(io: Server) {
         sessionId: engine.getRoomId(),
         socketId: socket.id,
         displayName: parsed.data.displayName,
+        deviceId: parsed.data.deviceId,
       });
 
       io.to(engine.getRoomId()).emit("room:player_joined", { state: engine.getPublicState() });
@@ -117,7 +134,7 @@ export function registerSocketHandlers(io: Server) {
       if (!ctx) return ack?.({ ok: false, error: "NOT_IN_ROOM" });
 
       engine.setPlayerReady(ctx.playerId, payload.ready);
-      io.to(engine.getRoomId()).emit("room:state", { state: engine.getPublicState() });
+      broadcastState(io, engine);
       ack?.({ ok: true });
     });
 
@@ -126,53 +143,48 @@ export function registerSocketHandlers(io: Server) {
       if (guard(socket, ack)) return;
       const engine = roomManager.getById(payload.roomId);
       if (!engine) return ack?.({ ok: false, error: "ROOM_NOT_FOUND" });
-      if (!engine.canStart()) return ack?.({ ok: false, error: "NOT_READY" });
 
-      engine.start();
+      const res = engine.start();
+      if (!res.ok) return ack?.({ ok: false, error: res.error ?? "CANNOT_START" });
+
       await prisma.gameSession.update({ where: { id: engine.getRoomId() }, data: { status: "PLAYING" } }).catch(() => {});
-
-      io.to(engine.getRoomId()).emit("game:start", { state: engine.getPublicState() });
-      sendCurrentQuestion(io, engine);
+      broadcastState(io, engine);
       ack?.({ ok: true });
     });
 
-    // ---- answer:submit ----
-    socket.on("answer:submit", async (payload, ack) => {
+    // ---- game:act (action générique du ruleset : answer, choose, resolve…) ----
+    socket.on("game:act", async (payload, ack) => {
       if (guard(socket, ack)) return;
-      const parsed = answerSubmitSchema.safeParse(payload);
+      const parsed = gameActSchema.safeParse(payload);
       if (!parsed.success) return ack?.({ ok: false, error: "INVALID_PAYLOAD" });
 
       const engine = roomManager.getById(parsed.data.roomId);
       if (!engine) return ack?.({ ok: false, error: "ROOM_NOT_FOUND" });
       const ctx = socketPlayerIndex.get(socket.id);
-      if (!ctx) return ack?.({ ok: false, error: "NOT_IN_ROOM" });
+      if (!ctx || ctx.roomId !== parsed.data.roomId) return ack?.({ ok: false, error: "NOT_IN_ROOM" });
 
-      const result = engine.submitAnswer(ctx.playerId, parsed.data.value);
-      if (!result.ok) return ack?.({ ok: false, error: result.reason }); // couvre la double-réponse (#24.8)
+      const res = engine.act(ctx.playerId, parsed.data.action, parsed.data.payload);
+      if (!res.ok) return ack?.({ ok: false, error: res.error });
 
-      // Informe l'autre joueur qu'une réponse est arrivée, SANS révéler sa valeur.
-      io.to(engine.getRoomId()).emit("answer:received", {
-        playerId: ctx.playerId,
-        answeredPlayerIds: engine.getPublicState().answeredPlayerIds,
-      });
-
-      if (result.bothAnswered) {
-        const { answers, isMatch, scoreDelta } = engine.reveal();
-        io.to(engine.getRoomId()).emit("answers:reveal", { answers, isMatch, scoreDelta, scores: engine.getPublicState().scores });
-        io.to(engine.getRoomId()).emit("score:update", { scores: engine.getPublicState().scores });
-      }
-
+      broadcastState(io, engine);
       ack?.({ ok: true });
     });
 
-    // ---- game:next_question ----
-    socket.on("game:next_question", async (payload: { roomId: string }, ack) => {
+    // ---- game:next (question suivante / tour suivant) ----
+    socket.on("game:next", async (payload, ack) => {
       if (guard(socket, ack)) return;
-      const engine = roomManager.getById(payload.roomId);
-      if (!engine) return ack?.({ ok: false, error: "ROOM_NOT_FOUND" });
+      const parsed = gameNextSchema.safeParse(payload);
+      if (!parsed.success) return ack?.({ ok: false, error: "INVALID_PAYLOAD" });
 
-      const { finished } = engine.nextQuestion();
-      if (finished) {
+      const engine = roomManager.getById(parsed.data.roomId);
+      if (!engine) return ack?.({ ok: false, error: "ROOM_NOT_FOUND" });
+      const ctx = socketPlayerIndex.get(socket.id);
+      if (!ctx || ctx.roomId !== parsed.data.roomId) return ack?.({ ok: false, error: "NOT_IN_ROOM" });
+
+      const res = engine.next(ctx.playerId);
+      if (!res.ok) return ack?.({ ok: false, error: res.error });
+
+      if (engine.getStatus() === "FINISHED") {
         const result = engine.getFinalResult();
         await prisma.gameSession.update({ where: { id: engine.getRoomId() }, data: { status: "FINISHED" } }).catch(() => {});
         await prisma.gameResult
@@ -182,17 +194,19 @@ export function registerSocketHandlers(io: Server) {
               coupleScorePct: result.coupleScorePct,
               player1Score: result.player1Score,
               player2Score: result.player2Score,
-              matchingAnswers: 0, // à affiner: dérivable du log GameEvent si besoin de détail
-              differentAnswers: 0,
-              bestStreak: 0,
+              matchingAnswers: result.matchingAnswers,
+              differentAnswers: result.differentAnswers,
+              bestStreak: result.bestStreak,
             },
           })
           .catch(() => {});
-        io.to(engine.getRoomId()).emit("game:finished", { result, state: engine.getPublicState() });
-      } else {
-        sendCurrentQuestion(io, engine);
+        for (const p of engine.getPlayers()) {
+          await prisma.player.update({ where: { id: p.id }, data: { score: p.score } }).catch(() => {});
+        }
       }
-      ack?.({ ok: true });
+
+      broadcastState(io, engine);
+      ack?.({ ok: true, result: engine.getStatus() === "FINISHED" ? engine.getFinalResult() : undefined });
     });
 
     // ---- chat:message ----
@@ -237,16 +251,13 @@ export function registerSocketHandlers(io: Server) {
         displayName: p?.displayName ?? "Joueur",
       });
 
-      io.to(engine.getRoomId()).emit("player:reconnect", { playerId: parsed.data.playerId, state: engine.getPublicState() });
-      // Renvoie l'état complet pour que le client resynchronise (question, score...)
-      socket.emit("game:resume", {
-        state: engine.getPublicState(),
-        currentQuestion: engine.getCurrentQuestionForClient(),
-      });
+      io.to(engine.getRoomId()).emit("player:reconnect", { playerId: parsed.data.playerId });
+      // Resynchronisation complète pour le joueur revenu.
+      socket.emit("state:update", engine.getPublicState());
       ack?.({ ok: true, state: engine.getPublicState() });
     });
 
-    // ---- déconnexion (coupure réseau, fermeture d'onglet — cas #24.5/6/11) ----
+    // ---- déconnexion (coupure réseau, fermeture d'onglet) ----
     socket.on("disconnect", () => {
       const ctx = socketPlayerIndex.get(socket.id);
       clearSocketRateLimit(socket.id);
@@ -258,10 +269,10 @@ export function registerSocketHandlers(io: Server) {
       io.to(ctx.roomId).emit("player:disconnect", { playerId: ctx.playerId });
       engine.markDisconnected(ctx.playerId, () => {
         // Grace period expirée -> partie abandonnée (règle #5)
-        io.to(ctx.roomId).emit("game:finished", {
-          abandoned: true,
-          reason: "PARTNER_DISCONNECTED",
-        });
+        prisma.gameSession
+          .update({ where: { id: ctx.roomId }, data: { status: "ABANDONED" } })
+          .catch(() => {});
+        broadcastState(io, engine);
         roomManager.destroyRoom(ctx.roomId);
       });
 
@@ -277,6 +288,7 @@ export function registerSocketHandlers(io: Server) {
         engine.removePlayer(ctx.playerId);
         io.to(payload.roomId).emit("room:player_left", { playerId: ctx.playerId });
         socket.leave(payload.roomId);
+        if (engine.getPlayers().length === 0) roomManager.destroyRoom(payload.roomId);
       }
     });
   });
@@ -285,15 +297,14 @@ export function registerSocketHandlers(io: Server) {
   setInterval(() => roomManager.cleanupExpired(), 1000 * 60 * 10);
 }
 
+function broadcastState(io: Server, engine: ReturnType<typeof roomManager.getById>) {
+  if (!engine) return;
+  io.to(engine.getRoomId()).emit("state:update", engine.getPublicState());
+}
+
 function registerPlayerSocket(playerId: string, socketId: string, roomId: string) {
   playerSocketIndex.set(playerId, socketId);
   socketPlayerIndex.set(socketId, { playerId, roomId });
-}
-
-function sendCurrentQuestion(io: Server, engine: ReturnType<typeof roomManager.getById>) {
-  if (!engine) return;
-  const question = engine.getCurrentQuestionForClient();
-  if (question) io.to(engine.getRoomId()).emit("question:send", { question });
 }
 
 /** Garde anti-abus simple sur les événements les plus sensibles. */

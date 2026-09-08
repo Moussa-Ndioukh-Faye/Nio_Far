@@ -5,7 +5,7 @@ import { logger } from "../utils/logger";
  * Persistance côté joueur. Le client envoie uniquement des intentions ;
  * cette couche n'est qu'un miroir (best-effort) de l'état en mémoire,
  * nécessaire pour que les FKs (ChatMessage.playerId, Answer.playerId…)
- * restent valides — sinon l'insertion du chat échouait en silence.
+ * restent valides — sinon l'insertion du chat échouerait en silence.
  */
 
 export async function upsertPlayerConnection(params: {
@@ -13,6 +13,7 @@ export async function upsertPlayerConnection(params: {
   sessionId: string;
   socketId: string;
   displayName: string;
+  deviceId?: string;
   isConnected?: boolean;
 }): Promise<void> {
   try {
@@ -23,11 +24,13 @@ export async function upsertPlayerConnection(params: {
         sessionId: params.sessionId,
         socketId: params.socketId,
         displayName: params.displayName,
+        deviceId: params.deviceId,
         isConnected: params.isConnected ?? true,
       },
       update: {
         socketId: params.socketId,
         displayName: params.displayName,
+        deviceId: params.deviceId,
         isConnected: params.isConnected ?? true,
       },
     });

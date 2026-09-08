@@ -1,202 +1,278 @@
-import { useState } from "react";
-import { motion } from "framer-motion";
+import { useState, useEffect, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
-import { useGame } from "../contexts/GameContext";
+import { motion } from "framer-motion";
 import { Mark } from "../components/Mark";
+import { useGame } from "../contexts/GameContext";
+import {
+  GAME_CATALOG,
+  CATEGORIES_ORDER,
+  CATEGORY_LABELS,
+  CATEGORY_GLYPHS,
+  DIFFICULTY_LABELS,
+  DIFFICULTY_GLYPHS,
+  getFavorites,
+  toggleFavorite,
+} from "../data/catalog";
+import { Category, Difficulty, HistoryEntry } from "../types";
 
-const GAME_TYPES: { id: string; label: string; tagline: string; glyph: React.ReactNode }[] = [
-  {
-    id: "GUESS_ME",
-    label: "Tu me connais ?",
-    tagline: "Devine ce que l'autre choisira",
-    glyph: (
-      <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
-        <circle cx="10" cy="12" r="6" />
-        <path d="M21 3l-4.5 4.5M16.5 3H21v4.5" />
-      </svg>
-    ),
-  },
-  {
-    id: "COUPLE_BATTLE",
-    label: "Couple Battle",
-    tagline: "Moi ou mon partenaire ?",
-    glyph: (
-      <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2">
-        <circle cx="9" cy="9" r="5" />
-        <circle cx="15" cy="15" r="5" />
-      </svg>
-    ),
-  },
-  {
-    id: "TRUTH_OR_DARE",
-    label: "Vérité ou Défi",
-    tagline: "Oserez-vous ?",
-    glyph: (
-      <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
-        <path d="M12 3v12M6 9h12" />
-      </svg>
-    ),
-  },
-];
-
-const container = {
-  hidden: {},
-  show: { transition: { staggerChildren: 0.07, delayChildren: 0.15 } },
-};
-const item = {
-  hidden: { opacity: 0, y: 16 },
-  show: { opacity: 1, y: 0, transition: { duration: 0.5, ease: [0.22, 1, 0.36, 1] as const } },
-};
+const NAME_KEY = "niofar_name";
 
 export function Home() {
-  const [name, setName] = useState("");
-  const [code, setCode] = useState("");
-  const [gameType, setGameType] = useState("GUESS_ME");
-  const [error, setError] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
-  const { createRoom, joinRoom } = useGame();
   const navigate = useNavigate();
+  const { createRoom, joinRoom, deviceId } = useGame();
 
-  async function handleCreate() {
-    if (!name.trim()) return setError("Choisis un prénom d'abord.");
+  const [name, setName] = useState(() => localStorage.getItem(NAME_KEY) ?? "");
+  const [category, setCategory] = useState<Category | null>(null);
+  const [difficulty, setDifficulty] = useState<Difficulty>("SOFT");
+  const [joinCode, setJoinCode] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [favorites, setFavorites] = useState<string[]>(() => getFavorites());
+  const [history, setHistory] = useState<HistoryEntry[]>([]);
+  const [showAllGames, setShowAllGames] = useState(false);
+
+  const filtered = useMemo(
+    () => (category ? GAME_CATALOG.filter((g) => g.category === category) : GAME_CATALOG),
+    [category]
+  );
+
+  const favGames = useMemo(() => GAME_CATALOG.filter((g) => favorites.includes(g.type)), [favorites]);
+
+  useEffect(() => {
+    localStorage.setItem(NAME_KEY, name);
+  }, [name]);
+
+  useEffect(() => {
+    fetch(`/api/me/history?deviceId=${encodeURIComponent(deviceId)}`)
+      .then((r) => (r.ok ? r.json() : { history: [] }))
+      .then((data) => setHistory(Array.isArray(data) ? data : (data?.history ?? [])))
+      .catch(() => {});
+  }, [deviceId]);
+
+  const gamesToShow = showAllGames ? filtered : filtered.slice(0, 8);
+
+  async function handlePlay(gameType: string, difficulty: Difficulty) {
+    if (!name.trim()) return;
     setBusy(true);
-    const res = await createRoom(name.trim(), gameType);
-    if (!res) {
-      setError("Impossible de créer la partie, réessaie.");
+    try {
+      const res = await createRoom(name.trim(), gameType as any, difficulty);
+      if (res) navigate(`/room/${res.code}`);
+    } finally {
       setBusy(false);
-      return;
     }
-    navigate(`/room/${res.code}`);
   }
 
   async function handleJoin() {
-    if (!name.trim() || !code.trim()) return setError("Prénom et code requis.");
+    if (!name.trim() || !joinCode.trim()) return;
     setBusy(true);
-    const ok = await joinRoom(name.trim(), code.trim().toUpperCase().replace(/^NF-?/, "NF-"));
-    if (!ok) {
-      setError("Code invalide ou partie déjà complète.");
+    try {
+      const ok = await joinRoom(name.trim(), joinCode.trim().toUpperCase());
+      if (ok) navigate(`/room/${joinCode.trim().toUpperCase()}`);
+    } finally {
       setBusy(false);
-      return;
     }
-    navigate(`/room/${code.trim().toUpperCase()}`);
+  }
+
+  function toggleFav(type: string) {
+    setFavorites(toggleFavorite(type));
   }
 
   return (
-    <div className="relative mx-auto flex min-h-screen w-full max-w-md flex-col justify-center px-6 py-12">
-      <motion.div variants={container} initial="hidden" animate="show" className="flex flex-col gap-7">
-        <motion.header variants={item} className="flex flex-col items-center gap-4 text-center">
-          <div className="relative">
-            <Mark size={64} className="animate-float drop-shadow-[0_10px_30px_rgba(199,75,47,0.45)]" />
-            <span className="absolute inset-0 -z-10 animate-spin-slow rounded-full border border-dashed border-saffron/25" />
-          </div>
-          <div>
-            <p className="eyebrow mb-1">Jouez · Découvrez-vous · Rapprochez-vous</p>
-            <h1 className="font-display text-5xl font-black tracking-tight text-paper">
-              NIO <span className="italic text-clay">FAR</span>
-            </h1>
-          </div>
-          <p className="max-w-[16rem] font-display text-base italic leading-snug text-sand">
-            Pour deux cœurs à distance qui veulent se retrouver.
+    <div className="mx-auto flex min-h-screen w-full max-w-md flex-col px-4 py-6">
+
+      {/* ---- Hero ---- */}
+      <header className="mb-8 flex flex-col items-center gap-4 text-center">
+        <Mark size={64} />
+        <div>
+          <h1 className="font-display text-4xl font-black text-paper">
+            NIO <span className="italic text-clay">FAR</span>
+          </h1>
+          <p className="mt-1 text-xs uppercase tracking-[0.26em] text-mute">
+            Le jeu qui rapproche les cœurs
           </p>
-        </motion.header>
+        </div>
+      </header>
 
-        {error && (
-          <motion.p
-            initial={{ opacity: 0, y: -6 }}
-            animate={{ opacity: 1, y: 0 }}
-            role="alert"
-            className="rounded-xl border border-bissap/40 bg-bissap/10 px-4 py-3 text-center text-sm text-bissap"
+      {/* ---- Name ---- */}
+      <div className="mb-6 flex flex-col gap-2">
+        <label className="eyebrow">Ton prénom</label>
+        <input
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          placeholder="Prénom"
+          className="field"
+          maxLength={24}
+        />
+      </div>
+
+      {/* ---- Difficulté ---- */}
+      <div className="mb-6 flex flex-col gap-2">
+        <label className="eyebrow">Niveau</label>
+        <div className="flex gap-2">
+          {(["SOFT", "NORMAL", "INTENSE"] as Difficulty[]).map((d) => (
+            <button
+              key={d}
+              onClick={() => setDifficulty(d)}
+              className={`flex-1 rounded-xl border px-3 py-2.5 text-center text-sm font-semibold transition ${
+                difficulty === d
+                  ? "border-saffron bg-saffron/15 text-saffron"
+                  : "border-line bg-ink/40 text-mute hover:border-clay/40 hover:text-sand"
+              }`}
+            >
+              <span className="mr-1">{DIFFICULTY_GLYPHS[d]}</span> {DIFFICULTY_LABELS[d]}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* ---- Catégories ---- */}
+      <div className="mb-4 flex flex-col gap-2">
+        <label className="eyebrow">Catégorie</label>
+        <div className="flex flex-wrap gap-2">
+          <button
+            onClick={() => setCategory(null)}
+            className={`rounded-xl border px-3 py-1.5 text-xs font-semibold transition ${
+              category === null
+                ? "border-saffron bg-saffron/15 text-saffron"
+                : "border-line bg-ink/40 text-mute hover:border-clay/40"
+            }`}
           >
-            {error}
-          </motion.p>
+            Tous
+          </button>
+          {CATEGORIES_ORDER.map((c) => (
+            <button
+              key={c}
+              onClick={() => setCategory(c)}
+              className={`rounded-xl border px-3 py-1.5 text-xs font-semibold transition ${
+                category === c
+                  ? "border-saffron bg-saffron/15 text-saffron"
+                  : "border-line bg-ink/40 text-mute hover:border-clay/40"
+              }`}
+            >
+              {CATEGORY_GLYPHS[c]} {CATEGORY_LABELS[c]}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* ---- Grille jeux ---- */}
+      <div className="mb-3 flex items-center justify-between">
+        <span className="eyebrow">{category ? CATEGORY_LABELS[category] : "Tous les jeux"}</span>
+        {filtered.length > 8 && (
+          <button onClick={() => setShowAllGames(!showAllGames)} className="text-xs text-saffron hover:underline">
+            {showAllGames ? "Voir moins" : `Voir les ${filtered.length}`}
+          </button>
         )}
-
-        <motion.section variants={item} className="flex flex-col gap-2">
-          <label htmlFor="name" className="eyebrow">Comment veux-tu apparaître ?</label>
-          <input
-            id="name"
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            placeholder="Ton prénom…"
-            maxLength={30}
-            className="field"
-          />
-        </motion.section>
-
-        <motion.section variants={item} className="flex flex-col gap-2">
-          <span className="eyebrow">Choisis un jeu</span>
-          <div className="flex flex-col gap-2.5">
-            {GAME_TYPES.map((g) => {
-              const active = gameType === g.id;
-              return (
+      </div>
+      <div className="grid grid-cols-2 gap-3 mb-8">
+        {gamesToShow.map((g) => {
+          const isFav = favorites.includes(g.type);
+          return (
+            <div key={g.type} className="card flex flex-col gap-2.5 p-4">
+              <div className="flex items-start justify-between">
+                <span className="text-3xl">{g.glyph}</span>
                 <button
-                  key={g.id}
-                  onClick={() => setGameType(g.id)}
-                  aria-pressed={active}
-                  className={`card group flex items-center gap-4 px-4 py-3.5 text-left transition duration-200 ${
-                    active ? "border-clay/70 shadow-glowClay" : "hover:border-saffron/30 hover:bg-ink3"
-                  }`}
+                  onClick={() => toggleFav(g.type)}
+                  className="text-lg transition hover:scale-110"
+                  aria-label={isFav ? "Retirer des favoris" : "Ajouter aux favoris"}
                 >
-                  <span
-                    className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl transition duration-200 ${
-                      active ? "bg-clay text-paper" : "bg-ink3 text-sand group-hover:text-paper"
-                    }`}
-                  >
-                    {g.glyph}
-                  </span>
-                  <span className="min-w-0">
-                    <span className={`block text-sm font-semibold ${active ? "text-paper" : "text-sand"}`}>{g.label}</span>
-                    <span className="block text-xs text-mute">{g.tagline}</span>
-                  </span>
-                  <span
-                    className={`ml-auto h-4 w-4 shrink-0 rounded-full border-2 transition duration-200 ${
-                      active ? "border-saffron bg-saffron" : "border-line"
-                    }`}
-                  />
+                  {isFav ? "❤️" : "🤍"}
                 </button>
+              </div>
+              <h3 className="font-display text-sm font-bold leading-snug text-paper">{g.name}</h3>
+              <p className="text-[0.65rem] leading-snug text-sand">{g.tagline}</p>
+              <span className="text-[0.6rem] uppercase tracking-widest text-mute">{CATEGORY_LABELS[g.category]}</span>
+              <button
+                onClick={() => handlePlay(g.type, difficulty)}
+                disabled={busy || !name.trim()}
+                className="btn-clay w-full py-2 text-xs"
+              >
+                Jouer
+              </button>
+            </div>
+          );
+        })}
+      </div>
+
+      {/* ---- Mes jeux favoris ---- */}
+      {favGames.length > 0 && (
+        <section className="mb-8">
+          <h2 className="eyebrow mb-3">Mes jeux ❤️</h2>
+          <div className="flex flex-col gap-2">
+            {favGames.map((g) => (
+              <div key={g.type} className="card flex items-center gap-3 px-4 py-3">
+                <span className="text-2xl">{g.glyph}</span>
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-sm font-semibold text-paper">{g.name}</p>
+                  <p className="truncate text-[0.65rem] text-sand">{g.tagline}</p>
+                </div>
+                <button
+                  onClick={() => handlePlay(g.type, difficulty)}
+                  disabled={busy || !name.trim()}
+                  className="btn-clay shrink-0 px-3 py-1.5 text-xs"
+                >
+                  Jouer
+                </button>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
+
+      {/* ---- Historique ---- */}
+      {history.length > 0 && (
+        <section className="mb-8">
+          <h2 className="eyebrow mb-3">Historique</h2>
+          <div className="flex flex-col gap-2">
+            {history.slice(0, 10).map((h) => {
+              const cat = CATEGORY_GLYPHS[h.category] ?? "🎲";
+              return (
+                <div key={h.id} className="card flex items-center gap-3 px-4 py-3">
+                  <span className="text-xl">{cat}</span>
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-sm font-semibold text-paper">
+                      {h.gameType.replace(/_/g, " ")}
+                    </p>
+                    <p className="text-[0.65rem] text-sand">
+                      {new Date(h.createdAt).toLocaleDateString("fr-FR")} · {h.status}
+                    </p>
+                  </div>
+                  {h.result && (
+                    <span className="rounded-lg bg-saffron/15 px-2 py-1 text-xs font-bold text-saffron">
+                      {h.result.coupleScorePct}%
+                    </span>
+                  )}
+                </div>
               );
             })}
           </div>
-        </motion.section>
+        </section>
+      )}
 
-        <motion.button
-          variants={item}
-          onClick={handleCreate}
-          disabled={busy}
-          className="btn-clay w-full py-4 text-lg"
-        >
-          {busy ? "Création…" : "Créer la partie"}
-        </motion.button>
-
-        <motion.div variants={item} className="flex items-center gap-4 text-sand">
-          <div className="h-px flex-1 bg-line" />
-          <span className="font-display italic text-mute">ou rejoindre</span>
-          <div className="h-px flex-1 bg-line" />
-        </motion.div>
-
-        <motion.div
-          variants={item}
-          className="card flex items-stretch gap-2 p-2.5"
-        >
-          <span className="flex items-center pl-3 font-display text-lg font-bold tracking-widest text-saffron">NF</span>
-          <div className="h-8 w-px self-center bg-line" />
+      {/* ---- Rejoindre ---- */}
+      <section className="mb-8 flex flex-col gap-3">
+        <h2 className="eyebrow">Rejoindre une partie</h2>
+        <div className="flex gap-2">
           <input
-            value={code}
-            onChange={(e) => setCode(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && handleJoin()}
-            placeholder="XXXX"
-            maxLength={10}
-            className="w-full bg-transparent px-3 font-display text-lg font-semibold uppercase tracking-[0.2em] text-paper outline-none placeholder:text-mute placeholder:font-sans placeholder:font-normal placeholder:tracking-normal"
+            value={joinCode}
+            onChange={(e) => setJoinCode(e.target.value.toUpperCase())}
+            placeholder="Code de la partie"
+            className="field flex-1"
+            maxLength={6}
           />
-          <button onClick={handleJoin} disabled={busy} className="btn btn-clay shrink-0 px-5">
+          <button
+            onClick={handleJoin}
+            disabled={busy || !name.trim() || !joinCode.trim()}
+            className="btn-clay shrink-0 px-5 py-3"
+          >
             Rejoindre
           </button>
-        </motion.div>
+        </div>
+      </section>
 
-        <motion.footer variants={item} className="pb-2 text-center">
-          <p className="text-xs text-mute">La partie démarre quand vous êtes deux, prêts à tout se dire.</p>
-        </motion.footer>
-      </motion.div>
+      {/* ---- Footer ---- */}
+      <footer className="mt-auto border-t border-line pt-6 pb-4 text-center text-[0.65rem] uppercase tracking-[0.22em] text-mute">
+        NIO FAR © {new Date().getFullYear()}
+      </footer>
     </div>
   );
 }

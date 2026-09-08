@@ -7,24 +7,56 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+enum GameCategory {
+  CONNAISSANCE // "À quel point tu me connais ?", devinez-vous
+  ACTION_VERITE
+  FUN
+  ROMANTIC
+  PROFOND
+  FLIRT
+  COMPETITION
+}
+
+enum Difficulty {
+  SOFT
+  NORMAL
+  INTENSE
+}
+
 enum GameType {
-  GUESS_ME       // "À quel point tu me connais ?"
-  COUPLE_BATTLE
-  TRUTH_OR_DARE
+  GUESS_ME             // "À quel point tu me connais ?"            -> CONNAISSANCE (standard)
+  GUESS_MY_ANSWER      // "Devine ma réponse"                       -> CONNAISSANCE (standard)
+  WHO_KNOWS_BEST       // "Qui connaît le mieux l'autre ?"          -> CONNAISSANCE (standard)
+  TRUTH_OR_DARE        // "Action ou Vérité"                        -> ACTION_VERITE (turnBased)
+  TRUTH                // "Vérité"                                  -> ACTION_VERITE (turnBased)
+  DARE                 // "Action"                                  -> ACTION_VERITE (turnBased)
+  WHO_IS_MORE          // "Qui de nous deux ?"                      -> FUN (standard)
+  WOULD_YOU_RATHER     // "Tu préfères ?"                           -> FUN (standard)
+  NO_YES_NO            // "Ni oui ni non"                           -> FUN (turnBased)
+  MIME_PARTNER         // "Mime ton partenaire"                     -> FUN (turnBased)
+  COMPLIMENT_CHALLENGE // "Compliment Challenge"                    -> ROMANTIC (turnBased)
+  OUR_MEMORIES         // "Nos souvenirs"                           -> ROMANTIC (standard)
+  COMPLETE_THE_SENTENCE// "Complète ma phrase"                      -> ROMANTIC (standard)
+  FIVE_THINGS          // "5 choses que j'aime chez toi"            -> ROMANTIC (turnBased)
+  DEEP_QUESTIONS       // "Questions profondes"                     -> PROFOND (standard)
+  OUR_DREAMS           // "Nos rêves"                               -> PROFOND (standard)
+  OUR_FUTURE           // "Notre futur"                             -> PROFOND (standard)
+  OUR_VALUES           // "Nos valeurs"                             -> PROFOND (standard)
+  FLIRT_QUESTIONS      // "Questions de flirt"                      -> FLIRT (standard)
+  SEDUCTION_CHALLENGES // "Défis de séduction"                      -> FLIRT (turnBased)
+  IMPOSSIBLE_CHOICE    // "Choix impossible"                        -> FLIRT (standard)
+  COUPLE_BATTLE        // "Couple Battle"                           -> COMPETITION (standard)
+  TIMED_QUIZ           // "Quiz chronométré"                        -> COMPETITION (standard)
+  SPEED_DUEL           // "Duel de rapidité"                        -> COMPETITION (standard)
 }
 
 enum SessionStatus {
   WAITING
   READY
   PLAYING
-  REVEALING
+  REVEALING // conservé pour compat avec d'anciennes sessions
   FINISHED
   ABANDONED
-}
-
-enum ChallengeType {
-  TRUTH
-  DARE
 }
 
 // Optionnel pour le MVP (pas de compte obligatoire), prévu pour plus tard.
@@ -40,10 +72,14 @@ model GameSession {
   id             String        @id @default(cuid())
   code           String        @unique // ex: NF-82K7
   gameType       GameType
+  category       GameCategory  @default(CONNAISSANCE)
+  difficulty     Difficulty    @default(SOFT)
+  scoringEnabled Boolean       @default(true)
+  totalRounds    Int           @default(20)
   status         SessionStatus @default(WAITING)
   hostPlayerId   String?
   currentQuestionIndex Int     @default(0)
-  questionOrder  String[]      // ids de questions/challenges dans l'ordre servi à cette session
+  questionOrder  String[]      // ids de cartes dans l'ordre servi à cette session
   createdAt      DateTime      @default(now())
   updatedAt      DateTime      @updatedAt
   expiresAt      DateTime      // parties abandonnées nettoyées après expiration
@@ -56,6 +92,7 @@ model GameSession {
 
   @@index([code])
   @@index([status])
+  @@index([category])
 }
 
 model Player {
@@ -65,6 +102,7 @@ model Player {
   session       GameSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
   userId        String?
   user          User?    @relation(fields: [userId], references: [id])
+  deviceId      String?  // identité anonyme de l'appareil, remonte l'historique de jeu
   socketId      String?
   isConnected   Boolean  @default(true)
   isReady       Boolean  @default(false)
@@ -76,24 +114,26 @@ model Player {
   chatMessages  ChatMessage[]
 
   @@index([sessionId])
+  @@index([deviceId])
   @@unique([sessionId, socketId])
 }
 
-model Question {
-  id        String   @id @default(cuid())
-  gameType  GameType
-  prompt    String
-  options   String[] // vide pour "Couple Battle" (MOI / MON PARTENAIRE) — géré côté logique
-  createdAt DateTime @default(now())
+// Catalogue de contenu générique : questions, vérités, défis, prompts.
+model GameCard {
+  id         String        @id @default(cuid())
+  gameType   GameType
+  category   GameCategory
+  difficulty Difficulty    @default(NORMAL)
+  type       String        // "QUESTION" | "TRUTH" | "DARE" | "CHALLENGE" | "PROMPT"
+  content    String
+  options    String[]      // options prédéfinies (vide si sans choix)
+  points     Int?          // points de base optionnels
+  isActive   Boolean       @default(true)
+  createdAt  DateTime      @default(now())
 
-  answers   Answer[]
-}
-
-model Challenge {
-  id        String        @id @default(cuid())
-  type      ChallengeType
-  text      String
-  createdAt DateTime      @default(now())
+  @@index([gameType, difficulty])
+  @@index([category, difficulty])
+  @@index([isActive])
 }
 
 model Answer {
@@ -102,9 +142,7 @@ model Answer {
   session     GameSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
   playerId    String
   player      Player   @relation(fields: [playerId], references: [id], onDelete: Cascade)
-  questionId  String?
-  question    Question? @relation(fields: [questionId], references: [id])
-  questionIndex Int    // position dans questionOrder, pour retrouver la question sans dépendre uniquement de questionId
+  questionIndex Int    // position dans questionOrder, pour retrouver la carte
   value       String   // réponse brute (option choisie, "MOI"/"MON PARTENAIRE", etc.)
   submittedAt DateTime @default(now())
 
@@ -142,7 +180,7 @@ model GameEvent {
   id        String   @id @default(cuid())
   sessionId String
   session   GameSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
-  type      String   // ex: "ROOM_CREATED", "ANSWER_SUBMITTED", "REVEAL", "PLAYER_DISCONNECTED"
+  type      String   // ex: "ROOM_CREATED", "GAME_STARTED", "GAME_ACT", "FINISHED"
   payload   Json?
   createdAt DateTime @default(now())
 

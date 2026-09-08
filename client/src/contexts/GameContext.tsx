@@ -1,24 +1,23 @@
 import { createContext, useContext, useEffect, useRef, useState, ReactNode } from "react";
 import { socket, emitWithAck } from "../socket";
-import { PublicRoomState, QuestionPayload, ChatMessage, FinalResult } from "../types";
+import { SessionPublicState, ChatMessage, GameType, Difficulty } from "../types";
+import { getDeviceId } from "../data/catalog";
 
 type ConnectionStatus = "online" | "reconnecting" | "offline";
 
 interface GameContextValue {
   playerId: string | null;
-  roomState: PublicRoomState | null;
-  currentQuestion: QuestionPayload | null;
+  state: SessionPublicState | null;
   messages: ChatMessage[];
   partnerStatus: ConnectionStatus;
-  lastReveal: { answers: Record<string, string>; isMatch: boolean } | null;
-  finalResult: FinalResult | null;
+  deviceId: string;
   resetSession: () => void;
-  createRoom: (displayName: string, gameType: string) => Promise<{ code: string; roomId: string } | null>;
+  createRoom: (displayName: string, gameType: GameType, difficulty: Difficulty) => Promise<{ code: string; roomId: string } | null>;
   joinRoom: (displayName: string, code: string) => Promise<boolean>;
   setReady: (ready: boolean) => void;
   startGame: () => void;
-  submitAnswer: (value: string) => void;
-  nextQuestion: () => void;
+  act: (action: string, payload?: unknown) => void;
+  next: () => void;
   sendChat: (text: string) => void;
 }
 
@@ -28,103 +27,79 @@ const STORAGE_KEY = "niofar_session";
 
 export function GameProvider({ children }: { children: ReactNode }) {
   const [playerId, setPlayerId] = useState<string | null>(null);
-  const [roomState, setRoomState] = useState<PublicRoomState | null>(null);
-  const [currentQuestion, setCurrentQuestion] = useState<QuestionPayload | null>(null);
+  const [state, setState] = useState<SessionPublicState | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [partnerStatus, setPartnerStatus] = useState<ConnectionStatus>("online");
-  const [lastReveal, setLastReveal] = useState<{ answers: Record<string, string>; isMatch: boolean } | null>(null);
-  const [finalResult, setFinalResult] = useState<FinalResult | null>(null);
   const roomIdRef = useRef<string | null>(null);
+  const deviceId = getDeviceId();
 
-  // Tentative de reprise automatique après refresh / reconnexion (cas #24.4, #24.12)
+  // Reprise automatique après refresh / reconnexion
   useEffect(() => {
     const saved = localStorage.getItem(STORAGE_KEY);
     if (saved) {
-      const { roomId, playerId: pid } = JSON.parse(saved);
-      roomIdRef.current = roomId;
-      setPlayerId(pid);
-      socket.emit("player:reconnect", { roomId, playerId: pid }, (res: { ok: boolean; state?: PublicRoomState }) => {
-        if (res.ok && res.state) setRoomState(res.state);
-      });
+      try {
+        const { roomId, playerId: pid } = JSON.parse(saved);
+        roomIdRef.current = roomId;
+        setPlayerId(pid);
+        socket.emit("player:reconnect", { roomId, playerId: pid }, (res: { ok: boolean; state?: SessionPublicState }) => {
+          if (res.ok && res.state) setState(res.state);
+        });
+      } catch { /* ignore corrupt session */ }
     }
 
-    socket.on("connect", () => setPartnerStatus((s) => (s === "offline" ? "online" : s)));
-    socket.on("disconnect", () => setPartnerStatus("reconnecting"));
+    function onConnect() { setPartnerStatus((s) => (s === "offline" ? "online" : s)); }
+    function onDisconnect() { setPartnerStatus("reconnecting"); }
 
-    socket.on("room:player_joined", ({ state }: { state: PublicRoomState }) => setRoomState(state));
-    socket.on("room:state", ({ state }: { state: PublicRoomState }) => setRoomState(state));
-    socket.on("room:player_left", () => setPartnerStatus("offline"));
-    socket.on("player:disconnect", () => setPartnerStatus("reconnecting"));
-    socket.on("player:reconnect", ({ state }: { state: PublicRoomState }) => {
-      setPartnerStatus("online");
-      setRoomState(state);
-    });
-    socket.on("game:resume", ({ state, currentQuestion }: { state: PublicRoomState; currentQuestion: QuestionPayload | null }) => {
-      setRoomState(state);
-      setCurrentQuestion(currentQuestion);
-    });
-    socket.on("game:start", ({ state }: { state: PublicRoomState }) => setRoomState(state));
-    socket.on("question:send", ({ question }: { question: QuestionPayload }) => {
-      setCurrentQuestion(question);
-      setLastReveal(null);
-    });
-    socket.on("answer:received", ({ answeredPlayerIds }: { answeredPlayerIds: string[] }) => {
-      setRoomState((prev) => (prev ? { ...prev, answeredPlayerIds } : prev));
-    });
-    socket.on("answers:reveal", ({ answers, isMatch, scores }: { answers: Record<string, string>; isMatch: boolean; scores: Record<string, number> }) => {
-      setLastReveal({ answers, isMatch });
-      setRoomState((prev) => (prev ? { ...prev, scores } : prev));
-    });
-    socket.on("game:finished", (data: { result?: FinalResult; state?: PublicRoomState; abandoned?: boolean; reason?: string }) => {
-      if (data.abandoned) {
-        setFinalResult({ coupleScorePct: 0, player1Score: 0, player2Score: 0, abandoned: true, reason: data.reason });
-      } else if (data.result) {
-        setRoomState(data.state ?? null);
-        setFinalResult(data.result);
-      }
-    });
-    socket.on("chat:message", (msg: ChatMessage) => setMessages((prev) => [...prev, msg]));
+    function onStateUpdate(s: SessionPublicState) { setState(s); }
+    function onPlayerJoined({ state: s }: { state: SessionPublicState }) { setState(s); }
+    function onPlayerLeft() { setPartnerStatus("offline"); }
+    function onPlayerDisconnect() { setPartnerStatus("reconnecting"); }
+    function onPlayerReconnect() { setPartnerStatus("online"); }
+    function onChatMessage(msg: ChatMessage) { setMessages((prev) => [...prev, msg]); }
+
+    socket.on("connect", onConnect);
+    socket.on("disconnect", onDisconnect);
+    socket.on("state:update", onStateUpdate);
+    socket.on("room:player_joined", onPlayerJoined);
+    socket.on("room:player_left", onPlayerLeft);
+    socket.on("player:disconnect", onPlayerDisconnect);
+    socket.on("player:reconnect", onPlayerReconnect);
+    socket.on("chat:message", onChatMessage);
 
     return () => {
-      socket.off("connect");
-      socket.off("disconnect");
-      socket.off("room:player_joined");
-      socket.off("room:state");
-      socket.off("room:player_left");
-      socket.off("player:disconnect");
-      socket.off("player:reconnect");
-      socket.off("game:resume");
-      socket.off("game:start");
-      socket.off("question:send");
-      socket.off("answer:received");
-      socket.off("answers:reveal");
-      socket.off("game:finished");
-      socket.off("chat:message");
+      socket.off("connect", onConnect);
+      socket.off("disconnect", onDisconnect);
+      socket.off("state:update", onStateUpdate);
+      socket.off("room:player_joined", onPlayerJoined);
+      socket.off("room:player_left", onPlayerLeft);
+      socket.off("player:disconnect", onPlayerDisconnect);
+      socket.off("player:reconnect", onPlayerReconnect);
+      socket.off("chat:message", onChatMessage);
     };
   }, []);
 
-  async function createRoom(displayName: string, gameType: string) {
-    const res = await emitWithAck<{ ok: boolean; roomId: string; code: string; playerId: string; state: PublicRoomState }>(
+  async function createRoom(displayName: string, gameType: GameType, difficulty: Difficulty) {
+    const res = await emitWithAck<{ ok: boolean; roomId: string; code: string; playerId: string; state: SessionPublicState; error?: string }>(
       "room:create",
-      { displayName, gameType }
+      { displayName, gameType, difficulty, deviceId }
     );
     if (!res.ok) return null;
     roomIdRef.current = res.roomId;
     setPlayerId(res.playerId);
-    setRoomState(res.state);
+    setState(res.state);
     localStorage.setItem(STORAGE_KEY, JSON.stringify({ roomId: res.roomId, playerId: res.playerId }));
     return { code: res.code, roomId: res.roomId };
   }
 
   async function joinRoom(displayName: string, code: string) {
-    const res = await emitWithAck<{ ok: boolean; roomId: string; playerId: string; state: PublicRoomState; error?: string }>(
+    const res = await emitWithAck<{ ok: boolean; roomId: string; playerId: string; state: SessionPublicState; error?: string }>(
       "room:join",
-      { displayName, code }
+      { displayName, code, deviceId }
     );
     if (!res.ok) return false;
     roomIdRef.current = res.roomId;
     setPlayerId(res.playerId);
-    setRoomState(res.state);
+    setState(res.state);
     localStorage.setItem(STORAGE_KEY, JSON.stringify({ roomId: res.roomId, playerId: res.playerId }));
     return true;
   }
@@ -139,14 +114,14 @@ export function GameProvider({ children }: { children: ReactNode }) {
     socket.emit("game:start", { roomId: roomIdRef.current });
   }
 
-  function submitAnswer(value: string) {
+  function act(action: string, payload?: unknown) {
     if (!roomIdRef.current) return;
-    socket.emit("answer:submit", { roomId: roomIdRef.current, value });
+    socket.emit("game:act", { roomId: roomIdRef.current, action, payload });
   }
 
-  function nextQuestion() {
+  function next() {
     if (!roomIdRef.current) return;
-    socket.emit("game:next_question", { roomId: roomIdRef.current });
+    socket.emit("game:next", { roomId: roomIdRef.current });
   }
 
   function sendChat(text: string) {
@@ -158,10 +133,7 @@ export function GameProvider({ children }: { children: ReactNode }) {
     localStorage.removeItem(STORAGE_KEY);
     roomIdRef.current = null;
     setPlayerId(null);
-    setRoomState(null);
-    setCurrentQuestion(null);
-    setLastReveal(null);
-    setFinalResult(null);
+    setState(null);
     setMessages([]);
   }
 
@@ -169,19 +141,17 @@ export function GameProvider({ children }: { children: ReactNode }) {
     <GameContext.Provider
       value={{
         playerId,
-        roomState,
-        currentQuestion,
+        state,
         messages,
         partnerStatus,
-        lastReveal,
-        finalResult,
+        deviceId,
         resetSession,
         createRoom,
         joinRoom,
         setReady,
         startGame,
-        submitAnswer,
-        nextQuestion,
+        act,
+        next,
         sendChat,
       }}
     >

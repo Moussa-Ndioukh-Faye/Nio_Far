@@ -1,8 +1,8 @@
-import { PrismaClient, GameType as PrismaGameType } from "@prisma/client";
-import { ContentItem } from "../game-engine/GameEngine";
-import { GameType } from "../types";
+import { PrismaClient, Difficulty as PrismaDifficulty, GameType as PrismaGameType } from "@prisma/client";
+import { DeckCard } from "../game-engine/rules";
+import { Difficulty, GameType } from "../types";
 
-const prisma = new PrismaClient();
+export const prisma = new PrismaClient();
 
 function shuffle<T>(arr: T[]): T[] {
   const a = [...arr];
@@ -14,24 +14,22 @@ function shuffle<T>(arr: T[]): T[] {
 }
 
 /**
- * Charge et mélange les questions pour un type de jeu donné.
- * Pour TRUTH_OR_DARE, on convertit les Challenges au format ContentItem
- * générique (une seule "option" implicite : accepter ou passer, géré côté
- * socket handler plutôt que comme choix multiple).
+ * Charge et mélange les cartes de contenu d'un jeu à un niveau donné.
+ * count = nombre de cartes souhaité (le ruleset ne pioche jamais au-delà).
  */
-export async function loadContentForGame(gameType: GameType, count = 20): Promise<ContentItem[]> {
-  if (gameType === "TRUTH_OR_DARE") {
-    const challenges = await prisma.challenge.findMany();
-    return shuffle(challenges)
-      .slice(0, count)
-      .map((c) => ({ id: c.id, prompt: c.text, options: ["✅ Fait", "🔄 Passer"] }));
-  }
-
-  const prismaType: PrismaGameType = gameType as unknown as PrismaGameType;
-  const questions = await prisma.question.findMany({ where: { gameType: prismaType } });
-  return shuffle(questions)
+export async function loadDeck(gameType: GameType, difficulty: Difficulty, count: number): Promise<DeckCard[]> {
+  const cards = await prisma.gameCard.findMany({
+    where: {
+      gameType: gameType as unknown as PrismaGameType,
+      difficulty: difficulty as unknown as PrismaDifficulty,
+      isActive: true,
+    },
+  });
+  return shuffle(cards)
     .slice(0, count)
-    .map((q) => ({ id: q.id, prompt: q.prompt, options: q.options }));
+    .map((c) => ({ id: c.id, type: c.type, content: c.content, options: c.options }));
 }
 
-export { prisma };
+export async function loadDeckForGame(params: { gameType: GameType; difficulty: Difficulty; count: number }): Promise<DeckCard[]> {
+  return loadDeck(params.gameType, params.difficulty, params.count);
+}
