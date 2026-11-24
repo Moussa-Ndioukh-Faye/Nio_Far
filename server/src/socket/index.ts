@@ -131,7 +131,7 @@ export function registerSocketHandlers(io: Server) {
       const engine = roomManager.getById(payload.roomId);
       if (!engine) return ack?.({ ok: false, error: "ROOM_NOT_FOUND" });
       const ctx = socketPlayerIndex.get(socket.id);
-      if (!ctx) return ack?.({ ok: false, error: "NOT_IN_ROOM" });
+      if (!ctx || ctx.roomId !== payload.roomId) return ack?.({ ok: false, error: "NOT_IN_ROOM" });
 
       engine.setPlayerReady(ctx.playerId, payload.ready);
       broadcastState(io, engine);
@@ -143,6 +143,9 @@ export function registerSocketHandlers(io: Server) {
       if (guard(socket, ack)) return;
       const engine = roomManager.getById(payload.roomId);
       if (!engine) return ack?.({ ok: false, error: "ROOM_NOT_FOUND" });
+      const ctx = socketPlayerIndex.get(socket.id);
+      if (!ctx || ctx.roomId !== payload.roomId) return ack?.({ ok: false, error: "NOT_IN_ROOM" });
+      if (ctx.playerId !== engine.getHostId()) return ack?.({ ok: false, error: "NOT_HOST" });
 
       const res = engine.start();
       if (!res.ok) return ack?.({ ok: false, error: res.error ?? "CANNOT_START" });
@@ -215,7 +218,7 @@ export function registerSocketHandlers(io: Server) {
       const parsed = chatMessageSchema.safeParse(payload);
       if (!parsed.success) return ack?.({ ok: false, error: "INVALID_PAYLOAD" });
       const ctx = socketPlayerIndex.get(socket.id);
-      if (!ctx) return ack?.({ ok: false, error: "NOT_IN_ROOM" });
+      if (!ctx || ctx.roomId !== parsed.data.roomId) return ack?.({ ok: false, error: "NOT_IN_ROOM" });
 
       const message = {
         playerId: ctx.playerId,
@@ -262,6 +265,11 @@ export function registerSocketHandlers(io: Server) {
       const ctx = socketPlayerIndex.get(socket.id);
       clearSocketRateLimit(socket.id);
       if (!ctx) return;
+      socketPlayerIndex.delete(socket.id);
+
+      // Le joueur s'est déjà reconnecté avec un nouveau socket (fréquent : le
+      // serveur ne détecte l'ancienne coupure qu'après pingTimeout) -> ne rien faire.
+      if (playerSocketIndex.get(ctx.playerId) !== socket.id) return;
 
       const engine = roomManager.getById(ctx.roomId);
       if (!engine) return;
@@ -276,7 +284,6 @@ export function registerSocketHandlers(io: Server) {
         roomManager.destroyRoom(ctx.roomId);
       });
 
-      socketPlayerIndex.delete(socket.id);
       markPlayerDisconnected(ctx.playerId);
       // NB: on garde playerSocketIndex pour permettre reconnectPlayer() de le retrouver si besoin.
     });
@@ -284,7 +291,7 @@ export function registerSocketHandlers(io: Server) {
     socket.on("room:leave", (payload: { roomId: string }) => {
       const engine = roomManager.getById(payload.roomId);
       const ctx = socketPlayerIndex.get(socket.id);
-      if (engine && ctx) {
+      if (engine && ctx && ctx.roomId === payload.roomId) {
         engine.removePlayer(ctx.playerId);
         io.to(payload.roomId).emit("room:player_left", { playerId: ctx.playerId });
         socket.leave(payload.roomId);
@@ -303,6 +310,8 @@ function broadcastState(io: Server, engine: ReturnType<typeof roomManager.getByI
 }
 
 function registerPlayerSocket(playerId: string, socketId: string, roomId: string) {
+  const previous = playerSocketIndex.get(playerId);
+  if (previous && previous !== socketId) socketPlayerIndex.delete(previous);
   playerSocketIndex.set(playerId, socketId);
   socketPlayerIndex.set(socketId, { playerId, roomId });
 }

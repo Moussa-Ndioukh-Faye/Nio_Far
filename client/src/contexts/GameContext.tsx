@@ -7,6 +7,10 @@ type ConnectionStatus = "online" | "reconnecting" | "offline";
 
 interface GameContextValue {
   playerId: string | null;
+  /** true tant qu'une reprise de session (après refresh / coupure) est en cours */
+  restoring: boolean;
+  /** état de MA connexion au serveur (distinct de celui du partenaire) */
+  selfStatus: ConnectionStatus;
   state: SessionPublicState | null;
   messages: ChatMessage[];
   partnerStatus: ConnectionStatus;
@@ -30,32 +34,68 @@ export function GameProvider({ children }: { children: ReactNode }) {
   const [state, setState] = useState<SessionPublicState | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [partnerStatus, setPartnerStatus] = useState<ConnectionStatus>("online");
+  const [selfStatus, setSelfStatus] = useState<ConnectionStatus>(socket.connected ? "online" : "reconnecting");
+  const [restoring, setRestoring] = useState<boolean>(() => !!localStorage.getItem(STORAGE_KEY));
   const roomIdRef = useRef<string | null>(null);
+  const playerIdRef = useRef<string | null>(null);
   const deviceId = getDeviceId();
 
-  // Reprise automatique après refresh / reconnexion
+  // Reprise de session : au chargement ET à chaque (re)connexion du socket.
+  // Après une coupure réseau, socket.io obtient un NOUVEL id : sans ce
+  // player:reconnect, le serveur ne le rattache pas à la room et la partie
+  // finit ABANDONED au bout du délai de grâce.
   useEffect(() => {
-    const saved = localStorage.getItem(STORAGE_KEY);
-    if (saved) {
+    function restoreSession() {
+      const saved = localStorage.getItem(STORAGE_KEY);
+      if (!saved) {
+        setRestoring(false);
+        return;
+      }
+      let session: { roomId: string; playerId: string };
       try {
-        const { roomId, playerId: pid } = JSON.parse(saved);
-        roomIdRef.current = roomId;
-        setPlayerId(pid);
-        socket.emit("player:reconnect", { roomId, playerId: pid }, (res: { ok: boolean; state?: SessionPublicState }) => {
-          if (res.ok && res.state) setState(res.state);
-        });
-      } catch { /* ignore corrupt session */ }
+        session = JSON.parse(saved);
+      } catch {
+        localStorage.removeItem(STORAGE_KEY);
+        setRestoring(false);
+        return;
+      }
+      roomIdRef.current = session.roomId;
+      playerIdRef.current = session.playerId;
+      setPlayerId(session.playerId);
+      setRestoring(true);
+      socket.emit(
+        "player:reconnect",
+        { roomId: session.roomId, playerId: session.playerId },
+        (res: { ok: boolean; state?: SessionPublicState; error?: string }) => {
+          if (res?.ok && res.state) {
+            setState(res.state);
+          } else if (res?.error === "ROOM_NOT_FOUND" || res?.error === "PLAYER_NOT_FOUND") {
+            // La room n'existe plus (expirée / serveur redémarré) : on repart propre.
+            localStorage.removeItem(STORAGE_KEY);
+            roomIdRef.current = null;
+            playerIdRef.current = null;
+            setPlayerId(null);
+            setState(null);
+          }
+          setRestoring(false);
+        }
+      );
     }
 
-    function onConnect() { setPartnerStatus((s) => (s === "offline" ? "online" : s)); }
-    function onDisconnect() { setPartnerStatus("reconnecting"); }
+    function onConnect() {
+      setSelfStatus("online");
+      restoreSession();
+    }
+    function onDisconnect() { setSelfStatus("reconnecting"); }
 
     function onStateUpdate(s: SessionPublicState) { setState(s); }
-    function onPlayerJoined({ state: s }: { state: SessionPublicState }) { setState(s); }
-    function onPlayerLeft() { setPartnerStatus("offline"); }
-    function onPlayerDisconnect() { setPartnerStatus("reconnecting"); }
-    function onPlayerReconnect() { setPartnerStatus("online"); }
+    function onPlayerJoined({ state: s }: { state: SessionPublicState }) { setState(s); setPartnerStatus("online"); }
+    function onPlayerLeft({ playerId: pid }: { playerId: string }) { if (pid !== playerIdRef.current) setPartnerStatus("offline"); }
+    function onPlayerDisconnect({ playerId: pid }: { playerId: string }) { if (pid !== playerIdRef.current) setPartnerStatus("reconnecting"); }
+    function onPlayerReconnect({ playerId: pid }: { playerId: string }) { if (pid !== playerIdRef.current) setPartnerStatus("online"); }
     function onChatMessage(msg: ChatMessage) { setMessages((prev) => [...prev, msg]); }
+
+    if (socket.connected) restoreSession(); // sinon onConnect s'en charge
 
     socket.on("connect", onConnect);
     socket.on("disconnect", onDisconnect);
@@ -85,8 +125,10 @@ export function GameProvider({ children }: { children: ReactNode }) {
     );
     if (!res.ok) return null;
     roomIdRef.current = res.roomId;
+    playerIdRef.current = res.playerId;
     setPlayerId(res.playerId);
     setState(res.state);
+    setMessages([]);
     localStorage.setItem(STORAGE_KEY, JSON.stringify({ roomId: res.roomId, playerId: res.playerId }));
     return { code: res.code, roomId: res.roomId };
   }
@@ -98,8 +140,10 @@ export function GameProvider({ children }: { children: ReactNode }) {
     );
     if (!res.ok) return false;
     roomIdRef.current = res.roomId;
+    playerIdRef.current = res.playerId;
     setPlayerId(res.playerId);
     setState(res.state);
+    setMessages([]);
     localStorage.setItem(STORAGE_KEY, JSON.stringify({ roomId: res.roomId, playerId: res.playerId }));
     return true;
   }
@@ -132,15 +176,19 @@ export function GameProvider({ children }: { children: ReactNode }) {
   function resetSession() {
     localStorage.removeItem(STORAGE_KEY);
     roomIdRef.current = null;
+    playerIdRef.current = null;
     setPlayerId(null);
     setState(null);
     setMessages([]);
+    setPartnerStatus("online");
   }
 
   return (
     <GameContext.Provider
       value={{
         playerId,
+        restoring,
+        selfStatus,
         state,
         messages,
         partnerStatus,
