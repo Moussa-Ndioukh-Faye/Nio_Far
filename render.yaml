@@ -12,6 +12,7 @@ services:
     rootDir: server
     plan: starter # le free "sleeps" : les WebSocket tombent après ~15 min d'inactivité
     buildCommand: npm install && npx prisma generate && npm run build
+    # Le seed ne s'exécute que si la table GameCard est vide (aucune donnée effacée au redémarrage)
     startCommand: npx prisma migrate deploy && npx prisma db seed && node dist/server.js
     healthCheckPath: /api/health
     envVars:
