@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useParams } from "react-router-dom";
 import { AnimatePresence, motion } from "framer-motion";
 import { useGame } from "../contexts/GameContext";
 import { Mark } from "../components/Mark";
@@ -9,10 +9,17 @@ import { getGameComponent } from "../games/registry";
 import { getCatalogEntry } from "../data/catalog";
 import { FinishedView } from "../types";
 
+const NAME_KEY = "niofar_name";
+
 export function Room() {
+  const { code: codeParam } = useParams<{ code: string }>();
+  const urlCode = (codeParam ?? "").trim().toUpperCase();
   const {
     state,
     playerId,
+    restoring,
+    selfStatus,
+    joinRoom,
     messages,
     partnerStatus,
     resetSession,
@@ -24,13 +31,75 @@ export function Room() {
   } = useGame();
   const navigate = useNavigate();
   const [chatText, setChatText] = useState("");
+  const [joinName, setJoinName] = useState(() => localStorage.getItem(NAME_KEY) ?? "");
+  const [joining, setJoining] = useState(false);
+  const [joinError, setJoinError] = useState<string | null>(null);
   const chatEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages.length]);
 
-  if (!state) {
+  // Arrivée via le lien d'invitation (/room/NF-XXXX) : pas encore membre de
+  // cette room -> on propose de la rejoindre avec un prénom.
+  const inThisRoom = !!state && state.meta.code === urlCode;
+
+  async function handleInviteJoin() {
+    const name = joinName.trim();
+    if (!name || !urlCode) return;
+    setJoining(true);
+    setJoinError(null);
+    localStorage.setItem(NAME_KEY, name);
+    try {
+      const ok = await joinRoom(name, urlCode);
+      if (!ok) setJoinError("Impossible de rejoindre : code invalide, partie pleine ou expirée.");
+    } catch {
+      setJoinError("Le serveur ne répond pas. Réessaie dans un instant.");
+    } finally {
+      setJoining(false);
+    }
+  }
+
+  if (!inThisRoom && !restoring && urlCode) {
+    return (
+      <div className="mx-auto flex min-h-screen w-full max-w-md flex-col justify-center px-6 py-10">
+        <motion.div
+          initial={{ opacity: 0, y: 12 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="card flex flex-col items-center gap-5 p-8 text-center"
+        >
+          <Mark size={52} />
+          <h1 className="font-display text-2xl font-black text-paper">On t'attend 💞</h1>
+          <p className="text-sm text-sand">
+            Tu as été invité(e) à la partie{" "}
+            <span className="font-display font-bold tracking-[0.18em] text-saffron">{urlCode}</span>
+          </p>
+          <input
+            value={joinName}
+            onChange={(e) => setJoinName(e.target.value)}
+            onKeyDown={(e) => { if (e.key === "Enter") handleInviteJoin(); }}
+            placeholder="Ton prénom"
+            maxLength={30}
+            className="field"
+            autoFocus
+          />
+          {joinError && <p className="text-sm text-bissap">{joinError}</p>}
+          <button
+            onClick={handleInviteJoin}
+            disabled={!joinName.trim() || joining}
+            className="btn-clay w-full py-3.5 text-lg disabled:opacity-50"
+          >
+            {joining ? "Connexion…" : "Rejoindre la partie"}
+          </button>
+          <button onClick={() => { resetSession(); navigate("/"); }} className="btn-ghost w-full py-2.5 text-sm">
+            Retour à l'accueil
+          </button>
+        </motion.div>
+      </div>
+    );
+  }
+
+  if (!state || !inThisRoom) {
     return (
       <div className="flex min-h-screen items-center justify-center gap-3 p-8 text-center text-neutral-400">
         <span className="h-5 w-5 animate-spin rounded-full border-2 border-saffron border-t-transparent" />
@@ -168,7 +237,7 @@ export function Room() {
       <Header />
 
       <div className="mb-4 flex gap-2.5">
-        <PresenceBadge name={me?.displayName ?? "Moi"} isConnected={true} isHost={me?.id === meta.hostId} score={me?.score} />
+        <PresenceBadge name={me?.displayName ?? "Moi"} isConnected={selfStatus === "online"} isHost={me?.id === meta.hostId} score={me?.score} />
         <PresenceBadge
           name={partner?.displayName ?? "En attente…"}
           isConnected={partner?.isConnected ?? false}
@@ -178,7 +247,17 @@ export function Room() {
       </div>
 
       <AnimatePresence>
-        {partnerStatus === "reconnecting" && partner && (
+        {selfStatus === "reconnecting" && (
+          <motion.p
+            initial={{ opacity: 0, height: 0 }}
+            animate={{ opacity: 1, height: "auto" }}
+            exit={{ opacity: 0, height: 0 }}
+            className="mb-4 overflow-hidden rounded-xl border border-bissap/40 bg-bissap/10 px-3 py-2.5 text-center text-sm text-bissap"
+          >
+            ⚠ Ta connexion a sauté — reconnexion en cours…
+          </motion.p>
+        )}
+        {selfStatus === "online" && partnerStatus === "reconnecting" && partner && (
           <motion.p
             initial={{ opacity: 0, height: 0 }}
             animate={{ opacity: 1, height: "auto" }}
