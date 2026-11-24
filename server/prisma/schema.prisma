@@ -48,6 +48,7 @@ enum GameType {
   COUPLE_BATTLE        // "Couple Battle"                           -> COMPETITION (standard)
   TIMED_QUIZ           // "Quiz chronométré"                        -> COMPETITION (standard)
   SPEED_DUEL           // "Duel de rapidité"                        -> COMPETITION (standard)
+  COUPLE_QUESTIONS     // "Questions de couple"                     -> PROFOND (turnBased)
 }
 
 enum SessionStatus {

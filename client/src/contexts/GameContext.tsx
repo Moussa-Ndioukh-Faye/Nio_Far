@@ -23,6 +23,12 @@ interface GameContextValue {
   act: (action: string, payload?: unknown) => void;
   next: () => void;
   sendChat: (text: string) => void;
+  /** à appeler à chaque frappe dans le chat (limité côté client) */
+  notifyTyping: () => void;
+  partnerTyping: boolean;
+  requestRematch: () => void;
+  /** décalage horloge serveur - horloge locale (ms), pour les chronos */
+  clockOffset: number;
 }
 
 const GameContext = createContext<GameContextValue | null>(null);
@@ -36,8 +42,20 @@ export function GameProvider({ children }: { children: ReactNode }) {
   const [partnerStatus, setPartnerStatus] = useState<ConnectionStatus>("online");
   const [selfStatus, setSelfStatus] = useState<ConnectionStatus>(socket.connected ? "online" : "reconnecting");
   const [restoring, setRestoring] = useState<boolean>(() => !!localStorage.getItem(STORAGE_KEY));
+  const [partnerTyping, setPartnerTyping] = useState(false);
+  const [clockOffset, setClockOffset] = useState(0);
   const roomIdRef = useRef<string | null>(null);
   const playerIdRef = useRef<string | null>(null);
+  const typingSentAt = useRef(0);
+  const typingStopTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const partnerTypingTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Chaque état reçu porte l'horloge serveur : on en déduit le décalage
+  // (approximation suffisante pour un compte à rebours à la seconde).
+  function applyState(s: SessionPublicState) {
+    if (typeof s.serverNow === "number") setClockOffset(s.serverNow - Date.now());
+    setState(s);
+  }
   const deviceId = getDeviceId();
 
   // Reprise de session : au chargement ET à chaque (re)connexion du socket.
@@ -66,9 +84,10 @@ export function GameProvider({ children }: { children: ReactNode }) {
       socket.emit(
         "player:reconnect",
         { roomId: session.roomId, playerId: session.playerId },
-        (res: { ok: boolean; state?: SessionPublicState; error?: string }) => {
+        (res: { ok: boolean; state?: SessionPublicState; messages?: ChatMessage[]; error?: string }) => {
           if (res?.ok && res.state) {
-            setState(res.state);
+            applyState(res.state);
+            if (Array.isArray(res.messages)) setMessages(res.messages);
           } else if (res?.error === "ROOM_NOT_FOUND" || res?.error === "PLAYER_NOT_FOUND") {
             // La room n'existe plus (expirée / serveur redémarré) : on repart propre.
             localStorage.removeItem(STORAGE_KEY);
@@ -88,14 +107,29 @@ export function GameProvider({ children }: { children: ReactNode }) {
     }
     function onDisconnect() { setSelfStatus("reconnecting"); }
 
-    function onStateUpdate(s: SessionPublicState) { setState(s); }
-    function onPlayerJoined({ state: s }: { state: SessionPublicState }) { setState(s); setPartnerStatus("online"); }
+    function onStateUpdate(s: SessionPublicState) { applyState(s); }
+    function onPlayerJoined({ state: s }: { state: SessionPublicState }) { applyState(s); setPartnerStatus("online"); }
     function onPlayerLeft({ playerId: pid }: { playerId: string }) { if (pid !== playerIdRef.current) setPartnerStatus("offline"); }
     function onPlayerDisconnect({ playerId: pid }: { playerId: string }) { if (pid !== playerIdRef.current) setPartnerStatus("reconnecting"); }
     function onPlayerReconnect({ playerId: pid }: { playerId: string }) { if (pid !== playerIdRef.current) setPartnerStatus("online"); }
-    function onChatMessage(msg: ChatMessage) { setMessages((prev) => [...prev, msg]); }
+    function onChatMessage(msg: ChatMessage) {
+      setMessages((prev) => (prev.some((m) => m.id === msg.id) ? prev : [...prev, msg]));
+      if (msg.playerId !== playerIdRef.current) setPartnerTyping(false);
+    }
+    function onChatTyping({ playerId: pid, typing }: { playerId: string; typing: boolean }) {
+      if (pid === playerIdRef.current) return;
+      setPartnerTyping(typing);
+      if (partnerTypingTimer.current) clearTimeout(partnerTypingTimer.current);
+      // filet de sécurité si le « stop » se perd
+      if (typing) partnerTypingTimer.current = setTimeout(() => setPartnerTyping(false), 5000);
+    }
 
-    if (socket.connected) restoreSession(); // sinon onConnect s'en charge
+    // Le socket peut s'être connecté AVANT que ces listeners existent : on
+    // aligne l'état tout de suite, sinon on afficherait « hors ligne » à tort.
+    if (socket.connected) {
+      setSelfStatus("online");
+      restoreSession(); // sinon onConnect s'en charge
+    }
 
     socket.on("connect", onConnect);
     socket.on("disconnect", onDisconnect);
@@ -105,6 +139,7 @@ export function GameProvider({ children }: { children: ReactNode }) {
     socket.on("player:disconnect", onPlayerDisconnect);
     socket.on("player:reconnect", onPlayerReconnect);
     socket.on("chat:message", onChatMessage);
+    socket.on("chat:typing", onChatTyping);
 
     return () => {
       socket.off("connect", onConnect);
@@ -115,6 +150,7 @@ export function GameProvider({ children }: { children: ReactNode }) {
       socket.off("player:disconnect", onPlayerDisconnect);
       socket.off("player:reconnect", onPlayerReconnect);
       socket.off("chat:message", onChatMessage);
+      socket.off("chat:typing", onChatTyping);
     };
   }, []);
 
@@ -127,14 +163,14 @@ export function GameProvider({ children }: { children: ReactNode }) {
     roomIdRef.current = res.roomId;
     playerIdRef.current = res.playerId;
     setPlayerId(res.playerId);
-    setState(res.state);
+    applyState(res.state);
     setMessages([]);
     localStorage.setItem(STORAGE_KEY, JSON.stringify({ roomId: res.roomId, playerId: res.playerId }));
     return { code: res.code, roomId: res.roomId };
   }
 
   async function joinRoom(displayName: string, code: string) {
-    const res = await emitWithAck<{ ok: boolean; roomId: string; playerId: string; state: SessionPublicState; error?: string }>(
+    const res = await emitWithAck<{ ok: boolean; roomId: string; playerId: string; state: SessionPublicState; messages?: ChatMessage[]; error?: string }>(
       "room:join",
       { displayName, code, deviceId }
     );
@@ -142,8 +178,8 @@ export function GameProvider({ children }: { children: ReactNode }) {
     roomIdRef.current = res.roomId;
     playerIdRef.current = res.playerId;
     setPlayerId(res.playerId);
-    setState(res.state);
-    setMessages([]);
+    applyState(res.state);
+    setMessages(Array.isArray(res.messages) ? res.messages : []);
     localStorage.setItem(STORAGE_KEY, JSON.stringify({ roomId: res.roomId, playerId: res.playerId }));
     return true;
   }
@@ -171,6 +207,33 @@ export function GameProvider({ children }: { children: ReactNode }) {
   function sendChat(text: string) {
     if (!roomIdRef.current) return;
     socket.emit("chat:message", { roomId: roomIdRef.current, text });
+    stopTyping();
+  }
+
+  function stopTyping() {
+    if (typingStopTimer.current) clearTimeout(typingStopTimer.current);
+    typingStopTimer.current = null;
+    if (typingSentAt.current && roomIdRef.current) {
+      socket.emit("chat:typing", { roomId: roomIdRef.current, typing: false });
+    }
+    typingSentAt.current = 0;
+  }
+
+  function notifyTyping() {
+    if (!roomIdRef.current) return;
+    const now = Date.now();
+    // au plus un « je tape » toutes les 2 s, et un « stop » après 3 s sans frappe
+    if (now - typingSentAt.current > 2000) {
+      socket.emit("chat:typing", { roomId: roomIdRef.current, typing: true });
+      typingSentAt.current = now;
+    }
+    if (typingStopTimer.current) clearTimeout(typingStopTimer.current);
+    typingStopTimer.current = setTimeout(stopTyping, 3000);
+  }
+
+  function requestRematch() {
+    if (!roomIdRef.current) return;
+    socket.emit("game:rematch", { roomId: roomIdRef.current });
   }
 
   function resetSession() {
@@ -181,6 +244,7 @@ export function GameProvider({ children }: { children: ReactNode }) {
     setState(null);
     setMessages([]);
     setPartnerStatus("online");
+    setPartnerTyping(false);
   }
 
   return (
@@ -201,6 +265,10 @@ export function GameProvider({ children }: { children: ReactNode }) {
         act,
         next,
         sendChat,
+        notifyTyping,
+        partnerTyping,
+        requestRematch,
+        clockOffset,
       }}
     >
       {children}
