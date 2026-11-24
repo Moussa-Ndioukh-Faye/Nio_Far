@@ -41,7 +41,7 @@ export type SessionStatus = "WAITING" | "READY" | "PLAYING" | "REVEALING" | "FIN
 export interface PlayerState {
   id: string;
   displayName: string;
-  socketId: string | null;
+  socketId?: string | null;
   isConnected: boolean;
   isReady: boolean;
   score: number;

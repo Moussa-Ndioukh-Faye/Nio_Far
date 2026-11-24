@@ -208,7 +208,8 @@ export class GameEngine implements RulesetHost {
 
   getPublicState(): SessionPublicState {
     return {
-      meta: { ...this.meta, players: this.meta.players.map((p) => ({ ...p })) },
+      // socketId reste côté serveur : il n'a rien à faire chez les clients.
+      meta: { ...this.meta, players: this.meta.players.map(({ socketId: _socketId, ...p }) => ({ ...p })) },
       view: this.rules.getView(),
     };
   }
