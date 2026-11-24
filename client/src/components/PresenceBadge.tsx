@@ -1,43 +1,69 @@
+import { motion } from "framer-motion";
+
 interface Props {
   name: string;
   isConnected: boolean;
   isReady?: boolean;
   isHost?: boolean;
   score?: number;
+  /** c'est son tour (jeux tour par tour) */
+  active?: boolean;
+  you?: boolean;
+  placeholder?: boolean;
 }
 
-export function PresenceBadge({ name, isConnected, isReady = false, isHost = false, score }: Props) {
+export function PresenceBadge({ name, isConnected, isReady, isHost = false, score, active = false, you = false, placeholder = false }: Props) {
   const initial = (name.trim()[0] ?? "?").toUpperCase();
+  const status = placeholder
+    ? "Invite-le/la"
+    : !isConnected
+      ? "Hors ligne"
+      : active
+        ? "Son tour"
+        : isReady === true
+          ? "Prêt(e)"
+          : isReady === false
+            ? "Pas prêt(e)"
+            : "En ligne";
 
   return (
-    <div className="card flex flex-1 items-center gap-3 px-4 py-3">
-      <div className="relative">
+    <div
+      className={`card relative flex min-w-0 items-center gap-2.5 px-3 py-2.5 transition ${
+        active ? "border-saffron/70 shadow-glowSaffron" : ""
+      } ${placeholder ? "border-dashed opacity-70" : ""}`}
+    >
+      <div className="relative shrink-0">
         <div
-          className={`flex h-10 w-10 items-center justify-center rounded-full font-display text-lg font-semibold ${
-            isConnected ? "bg-clay/85 text-paper" : "bg-ink3 text-sand"
+          className={`flex h-9 w-9 items-center justify-center rounded-full font-display text-base font-semibold ${
+            placeholder ? "bg-ink3 text-mute" : isConnected ? "bg-clay/85 text-paper" : "bg-ink3 text-sand"
           }`}
         >
-          {initial}
+          {placeholder ? "?" : initial}
         </div>
-        <span
-          className={`absolute -bottom-0.5 -right-0.5 h-3 w-3 rounded-full border-2 border-ink2 ${
-            isConnected ? "bg-leaf" : "bg-mute"
-          }`}
-        />
+        {!placeholder && (
+          <span
+            className={`absolute -bottom-0.5 -right-0.5 h-3 w-3 rounded-full border-2 border-ink2 ${isConnected ? "bg-leaf" : "bg-mute"}`}
+          />
+        )}
       </div>
-      <div className="min-w-0">
-        <p className="flex items-center gap-1.5 truncate text-sm font-semibold text-paper">
-          {name}
-          {isHost && <span className="text-[0.65rem] text-saffron" title="Hôte">★</span>}
+      <div className="min-w-0 flex-1">
+        <p className="flex items-center gap-1 truncate text-sm font-semibold text-paper">
+          <span className="truncate">{name}</span>
+          {isHost && <span className="shrink-0 text-[0.65rem] text-saffron" title="Hôte">★</span>}
         </p>
-        <p className="text-[0.7rem] uppercase tracking-widest text-mute">
-          {isConnected ? (isReady ? "Prêt(e) · en ligne" : "En ligne") : "Hors ligne"}
+        <p className={`truncate text-[0.6rem] uppercase tracking-wider ${active ? "text-saffron" : "text-mute"}`}>
+          {you ? `Toi · ${status}` : status}
         </p>
       </div>
       {score !== undefined && (
-        <div className="ml-auto rounded-lg bg-saffron/15 px-2 py-1 font-display text-sm font-bold text-saffron">
+        <motion.div
+          key={score}
+          initial={{ scale: 1.35 }}
+          animate={{ scale: 1 }}
+          className="shrink-0 rounded-lg bg-saffron/15 px-1.5 py-0.5 font-display text-sm font-bold tabular-nums text-saffron"
+        >
           {score}
-        </div>
+        </motion.div>
       )}
     </div>
   );
