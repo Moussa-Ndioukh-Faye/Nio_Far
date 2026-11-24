@@ -9,6 +9,10 @@
 
   body {
     @apply bg-ink text-paper font-sans antialiased;
+    /* app installée (iOS barre de statut translucide) : on respecte les encoches */
+    padding: env(safe-area-inset-top) env(safe-area-inset-right) 0 env(safe-area-inset-left);
+    -webkit-tap-highlight-color: transparent;
+    overscroll-behavior-y: none;
     background-image:
       radial-gradient(1100px 620px at 18% -12%, rgba(199, 75, 47, 0.2), transparent 62%),
       radial-gradient(900px 520px at 112% 24%, rgba(230, 168, 55, 0.09), transparent 58%),
