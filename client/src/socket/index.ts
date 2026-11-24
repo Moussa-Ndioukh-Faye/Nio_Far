@@ -1,7 +1,7 @@
 import { io, Socket } from "socket.io-client";
 import { getDeviceId } from "../data/catalog";
 
-const SERVER_URL = import.meta.env.VITE_SERVER_URL ?? "http://localhost:4000";
+export const SERVER_URL = (import.meta.env.VITE_SERVER_URL ?? "http://localhost:4000").replace(/\/$/, "");
 
 // Un seul socket partagé pour toute l'app (créé au premier import).
 // Le deviceId est envoyé en handshake pour identifier l'appareil (historique, reconnexion).

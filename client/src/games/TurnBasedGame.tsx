@@ -5,6 +5,17 @@ import { TurnBasedView } from "../types";
 const PHASE_LABELS: Record<string, string> = {
   TRUTH: "Vérité",
   DARE: "Action",
+  CHALLENGE: "Défi",
+  QUESTION: "Question",
+  PROMPT: "À toi",
+};
+
+const CHOICE_LABELS: Record<string, string> = {
+  TRUTH: "🤫 Vérité",
+  DARE: "🤸 Action",
+  CHALLENGE: "🎯 Défi",
+  QUESTION: "❓ Question",
+  PROMPT: "💬 Carte",
 };
 
 export function TurnBasedGame({ state, playerId, act, next }: GameComponentProps) {
@@ -123,7 +134,7 @@ export function TurnBasedGame({ state, playerId, act, next }: GameComponentProps
               onClick={() => act("choose", { type: opt })}
               className="btn w-full border border-clay bg-clay/15 py-4 text-lg font-display font-black text-clay hover:bg-clay/25 transition"
             >
-              {opt === "TRUTH" ? "🤫 Vérité" : "🤸 Action"}
+              {CHOICE_LABELS[opt] ?? opt}
             </button>
           ))}
         </div>

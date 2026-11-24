@@ -53,7 +53,7 @@ export type SessionStatus =
 export interface PlayerState {
   id: string;
   displayName: string;
-  socketId: string | null;
+  socketId?: string | null; // jamais envoyé au client
   isConnected: boolean;
   isReady: boolean;
   score: number;

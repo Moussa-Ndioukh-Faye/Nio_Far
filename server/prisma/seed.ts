@@ -992,9 +992,20 @@ const ALL_SPECS: GameSpec[] = [
 ];
 
 async function main() {
-  console.log("Nettoyage du contenu…");
-  await prisma.answer.deleteMany();
-  await prisma.gameCard.deleteMany();
+  // Le seed est lancé à chaque démarrage (render.yaml) : il ne doit RIEN
+  // effacer si le contenu existe déjà. Pour régénérer les cartes de force :
+  //   SEED_FORCE=1 npx prisma db seed
+  // (les réponses et sessions des joueurs ne sont jamais supprimées)
+  const force = ["1", "true", "yes"].includes(String(process.env.SEED_FORCE ?? "").toLowerCase());
+  const existing = await prisma.gameCard.count();
+  if (existing > 0 && !force) {
+    console.log(`Seed ignoré : ${existing} cartes déjà présentes (SEED_FORCE=1 pour régénérer).`);
+    return;
+  }
+  if (existing > 0) {
+    console.log("SEED_FORCE : remplacement des cartes de contenu…");
+    await prisma.gameCard.deleteMany();
+  }
 
   const rows: GameCardData[] = [];
   for (const spec of ALL_SPECS) {

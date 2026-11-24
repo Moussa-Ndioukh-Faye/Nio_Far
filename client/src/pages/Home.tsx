@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
 import { Mark } from "../components/Mark";
 import { useGame } from "../contexts/GameContext";
+import { SERVER_URL } from "../socket";
 import {
   GAME_CATALOG,
   CATEGORIES_ORDER,
@@ -42,7 +43,7 @@ export function Home() {
   }, [name]);
 
   useEffect(() => {
-    fetch(`/api/me/history?deviceId=${encodeURIComponent(deviceId)}`)
+    fetch(`${SERVER_URL}/api/me/history?deviceId=${encodeURIComponent(deviceId)}`)
       .then((r) => (r.ok ? r.json() : { history: [] }))
       .then((data) => setHistory(Array.isArray(data) ? data : (data?.history ?? [])))
       .catch(() => {});
