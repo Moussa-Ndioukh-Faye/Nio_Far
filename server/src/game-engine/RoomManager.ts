@@ -48,7 +48,11 @@ export class RoomManager {
       totalRounds: game.roundsByDifficulty[params.difficulty],
       hostId: params.hostId,
       deck: params.deck,
-      buildRules: createRules(game.family as GameFamily, cardTypes),
+      buildRules: createRules(game.family as GameFamily, cardTypes, {
+        timerSeconds: game.timerSeconds ?? null,
+        speedBonus: game.speedBonus ?? false,
+      }),
+      timerSeconds: game.family === "STANDARD" ? game.timerSeconds ?? null : null,
     });
 
     this.rooms.set(roomId, { engine, lastActivityAt: Date.now() });
@@ -78,6 +82,7 @@ export class RoomManager {
   destroyRoom(roomId: string) {
     const entry = this.rooms.get(roomId);
     if (!entry) return;
+    entry.engine.dispose();
     this.codeToRoomId.delete(entry.engine.getCode());
     this.rooms.delete(roomId);
     logger.info("Room détruite", { roomId });

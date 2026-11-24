@@ -6,7 +6,17 @@ import { loadDeckForGame, prisma } from "../services/contentService";
 import { upsertPlayerConnection, markPlayerDisconnected } from "../services/persistence";
 import { logger } from "../utils/logger";
 import { isSocketRateLimited, clearSocketRateLimit } from "../middleware/rateLimit";
-import { createRoomSchema, joinRoomSchema, chatMessageSchema, reconnectSchema, gameActSchema, gameNextSchema } from "../middleware/validation";
+import {
+  createRoomSchema,
+  joinRoomSchema,
+  chatMessageSchema,
+  chatTypingSchema,
+  reconnectSchema,
+  gameActSchema,
+  gameNextSchema,
+  roomOnlySchema,
+} from "../middleware/validation";
+import { GameEngine } from "../game-engine/GameEngine";
 
 // playerId <-> socket.id mapping pour retrouver un joueur lors d'une reconnexion
 const playerSocketIndex: Map<string, string> = new Map(); // playerId -> current socketId
@@ -23,9 +33,7 @@ export function registerSocketHandlers(io: Server) {
       if (!parsed.success) return ack?.({ ok: false, error: "INVALID_PAYLOAD" });
 
       const game = getCatalogEntry(parsed.data.gameType);
-      const totalRounds = game.roundsByDifficulty[parsed.data.difficulty];
-      const cardTypes = game.cardType === "MIXED" ? game.options.length : 1;
-      const deckCount = game.family === "TURN_BASED" ? totalRounds * cardTypes : totalRounds;
+      const deckCount = deckSize(game, parsed.data.difficulty);
 
       const deck = await loadDeckForGame({
         gameType: parsed.data.gameType,
@@ -41,6 +49,9 @@ export function registerSocketHandlers(io: Server) {
         hostId: playerId,
         deck,
       });
+
+      // Fin de chrono : l'état change sans action d'un joueur -> on diffuse.
+      engine.setUpdateListener(() => broadcastState(io, engine));
 
       const add = engine.addPlayer({ id: playerId, displayName: parsed.data.displayName, socketId: socket.id });
       if (!add.ok) return ack?.({ ok: false, error: add.reason });
@@ -122,7 +133,7 @@ export function registerSocketHandlers(io: Server) {
       });
 
       io.to(engine.getRoomId()).emit("room:player_joined", { state: engine.getPublicState() });
-      ack?.({ ok: true, roomId: engine.getRoomId(), playerId, state: engine.getPublicState() });
+      ack?.({ ok: true, roomId: engine.getRoomId(), playerId, state: engine.getPublicState(), messages: engine.getChat() });
     });
 
     // ---- player:ready ----
@@ -187,26 +198,7 @@ export function registerSocketHandlers(io: Server) {
       const res = engine.next(ctx.playerId);
       if (!res.ok) return ack?.({ ok: false, error: res.error });
 
-      if (engine.getStatus() === "FINISHED") {
-        const result = engine.getFinalResult();
-        await prisma.gameSession.update({ where: { id: engine.getRoomId() }, data: { status: "FINISHED" } }).catch(() => {});
-        await prisma.gameResult
-          .create({
-            data: {
-              sessionId: engine.getRoomId(),
-              coupleScorePct: result.coupleScorePct,
-              player1Score: result.player1Score,
-              player2Score: result.player2Score,
-              matchingAnswers: result.matchingAnswers,
-              differentAnswers: result.differentAnswers,
-              bestStreak: result.bestStreak,
-            },
-          })
-          .catch(() => {});
-        for (const p of engine.getPlayers()) {
-          await prisma.player.update({ where: { id: p.id }, data: { score: p.score } }).catch(() => {});
-        }
-      }
+      if (engine.getStatus() === "FINISHED") await persistFinished(engine);
 
       broadcastState(io, engine);
       ack?.({ ok: true, result: engine.getStatus() === "FINISHED" ? engine.getFinalResult() : undefined });
@@ -220,16 +212,65 @@ export function registerSocketHandlers(io: Server) {
       const ctx = socketPlayerIndex.get(socket.id);
       if (!ctx || ctx.roomId !== parsed.data.roomId) return ack?.({ ok: false, error: "NOT_IN_ROOM" });
 
+      const engine = roomManager.getById(parsed.data.roomId);
+      if (!engine) return ack?.({ ok: false, error: "ROOM_NOT_FOUND" });
+
       const message = {
+        id: nanoid(),
         playerId: ctx.playerId,
         text: parsed.data.text,
         createdAt: Date.now(),
       };
+      engine.addChat(message);
       io.to(parsed.data.roomId).emit("chat:message", message);
       await prisma.chatMessage
         .create({ data: { sessionId: parsed.data.roomId, playerId: ctx.playerId, text: parsed.data.text } })
         .catch(() => {});
       ack?.({ ok: true });
+    });
+
+    // ---- chat:typing (indicateur « est en train d'écrire ») ----
+    // Pas de guard() ici : le client limite déjà la fréquence, et ces
+    // événements ne doivent pas consommer le quota des actions de jeu.
+    socket.on("chat:typing", (payload) => {
+      const parsed = chatTypingSchema.safeParse(payload);
+      if (!parsed.success) return;
+      const ctx = socketPlayerIndex.get(socket.id);
+      if (!ctx || ctx.roomId !== parsed.data.roomId) return;
+      socket.to(ctx.roomId).emit("chat:typing", { playerId: ctx.playerId, typing: parsed.data.typing });
+    });
+
+    // ---- game:rematch (revanche : même jeu, même room, nouveau paquet) ----
+    socket.on("game:rematch", async (payload, ack) => {
+      if (guard(socket, ack)) return;
+      const parsed = roomOnlySchema.safeParse(payload);
+      if (!parsed.success) return ack?.({ ok: false, error: "INVALID_PAYLOAD" });
+      const engine = roomManager.getById(parsed.data.roomId);
+      if (!engine) return ack?.({ ok: false, error: "ROOM_NOT_FOUND" });
+      const ctx = socketPlayerIndex.get(socket.id);
+      if (!ctx || ctx.roomId !== parsed.data.roomId) return ack?.({ ok: false, error: "NOT_IN_ROOM" });
+
+      const vote = engine.voteRematch(ctx.playerId);
+      if (!vote.ok) return ack?.({ ok: false, error: vote.error });
+
+      if (vote.ready) {
+        const meta = engine.getMetaData();
+        const game = getCatalogEntry(meta.gameType);
+        const deck = await loadDeckForGame({
+          gameType: meta.gameType,
+          difficulty: meta.difficulty,
+          count: deckSize(game, meta.difficulty),
+        });
+        if (deck.length < 1) return ack?.({ ok: false, error: "NO_CONTENT" });
+        const res = engine.restart(deck);
+        if (!res.ok) return ack?.({ ok: false, error: res.error });
+        await prisma.gameSession
+          .update({ where: { id: engine.getRoomId() }, data: { status: "PLAYING", questionOrder: deck.map((c) => c.id) } })
+          .catch(() => {});
+      }
+
+      broadcastState(io, engine);
+      ack?.({ ok: true, started: !!vote.ready });
     });
 
     // ---- player:reconnect (reconnexion explicite avec playerId connu, ex: après refresh) ----
@@ -257,7 +298,7 @@ export function registerSocketHandlers(io: Server) {
       io.to(engine.getRoomId()).emit("player:reconnect", { playerId: parsed.data.playerId });
       // Resynchronisation complète pour le joueur revenu.
       socket.emit("state:update", engine.getPublicState());
-      ack?.({ ok: true, state: engine.getPublicState() });
+      ack?.({ ok: true, state: engine.getPublicState(), messages: engine.getChat() });
     });
 
     // ---- déconnexion (coupure réseau, fermeture d'onglet) ----
@@ -302,6 +343,34 @@ export function registerSocketHandlers(io: Server) {
 
   // Nettoyage périodique des rooms inactives (règle #24.10 / #23 expiration)
   setInterval(() => roomManager.cleanupExpired(), 1000 * 60 * 10);
+}
+
+/** Nombre de cartes à charger : en tour par tour MIXED, de quoi tenir sur chaque type. */
+function deckSize(game: ReturnType<typeof getCatalogEntry>, difficulty: keyof ReturnType<typeof getCatalogEntry>["roundsByDifficulty"]) {
+  const totalRounds = game.roundsByDifficulty[difficulty];
+  const cardTypes = game.cardType === "MIXED" ? game.options.length : 1;
+  return game.family === "TURN_BASED" ? totalRounds * cardTypes : totalRounds;
+}
+
+async function persistFinished(engine: GameEngine) {
+  const result = engine.getFinalResult();
+  await prisma.gameSession.update({ where: { id: engine.getRoomId() }, data: { status: "FINISHED" } }).catch(() => {});
+  await prisma.gameResult
+    .create({
+      data: {
+        sessionId: engine.getRoomId(),
+        coupleScorePct: result.coupleScorePct,
+        player1Score: result.player1Score,
+        player2Score: result.player2Score,
+        matchingAnswers: result.matchingAnswers,
+        differentAnswers: result.differentAnswers,
+        bestStreak: result.bestStreak,
+      },
+    })
+    .catch(() => {});
+  for (const p of engine.getPlayers()) {
+    await prisma.player.update({ where: { id: p.id }, data: { score: p.score } }).catch(() => {});
+  }
 }
 
 function broadcastState(io: Server, engine: ReturnType<typeof roomManager.getById>) {

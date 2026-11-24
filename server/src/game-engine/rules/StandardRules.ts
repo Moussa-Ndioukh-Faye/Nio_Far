@@ -1,26 +1,46 @@
-import { GameView, RoomResultSummary, StandardReveal, StandardView } from "../../types";
-import { ActionResult, DeckCard, Ruleset, RulesetHost } from "../rules";
+import { GameView, RoomResultSummary, RoundRecap, StandardReveal } from "../../types";
+import { ActionResult, DeckCard, Ruleset, RulesetHost, RulesOptions, verdictFor } from "../rules";
 
-const POINTS_PER_MATCH = 10;
+export const POINTS_PER_MATCH = 10;
+export const SPEED_BONUS = 5;
+/** marge laissée aux réponses parties juste avant la fin du chrono (latence réseau) */
+const LATENCY_GRACE_MS = 400;
 
+export const ME = "MOI";
+export const PARTNER = "MON PARTENAIRE";
+export const TIMEOUT_ANSWER = "⏱️ Temps écoulé";
+
+/**
+ * Règles « standard » : les deux joueurs répondent en même temps à la même
+ * question, puis on révèle. Variante chronométrée si timerSeconds est fourni.
+ */
 export class StandardRules implements Ruleset {
   readonly family = "STANDARD" as const;
 
   private host: RulesetHost;
+  private timerMs: number | null;
+  private speedBonus: boolean;
+
   private deck: DeckCard[] = [];
   private round = 1;
   private phase: "QUESTION" | "REVEAL" = "QUESTION";
   private currentCard: DeckCard | null = null;
   private answers: Record<string, string> = {};
+  private answerTimes: Record<string, number> = {};
+  private questionStartedAt = 0;
+  private deadline: number | null = null;
   private reveal: StandardReveal | null = null;
   private finished = false;
   private matchingAnswers = 0;
   private differentAnswers = 0;
   private bestStreak = 0;
   private currentStreak = 0;
+  private recap: RoundRecap[] = [];
 
-  constructor(host: RulesetHost) {
+  constructor(host: RulesetHost, options: RulesOptions = {}) {
     this.host = host;
+    this.timerMs = options.timerSeconds ? options.timerSeconds * 1000 : null;
+    this.speedBonus = !!options.speedBonus;
   }
 
   loadDeck(deck: DeckCard[]): void {
@@ -31,12 +51,14 @@ export class StandardRules implements Ruleset {
     this.round = 1;
     this.phase = "QUESTION";
     this.answers = {};
+    this.answerTimes = {};
     this.reveal = null;
     this.finished = false;
     this.matchingAnswers = 0;
     this.differentAnswers = 0;
     this.bestStreak = 0;
     this.currentStreak = 0;
+    this.recap = [];
     if (!this.pickQuestion(1)) {
       return { ok: false, error: "EMPTY_DECK" };
     }
@@ -44,41 +66,55 @@ export class StandardRules implements Ruleset {
   }
 
   act(playerId: string, action: string, payload: unknown): ActionResult {
-    if (action === "answer") {
-      if (this.finished || this.phase !== "QUESTION") return { ok: false, error: "WRONG_PHASE" };
-      if (this.answers[playerId]) return { ok: false, error: "ALREADY_ANSWERED" };
-      const p = this.host.players.find((pl) => pl.id === playerId);
-      if (!p) return { ok: false, error: "NOT_IN_ROOM" };
-
-      const value = String((payload as { value?: unknown })?.value ?? "").trim();
-      if (!value) return { ok: false, error: "INVALID_ANSWER" };
-      if (this.currentCard && this.currentCard.options.length > 0 && !this.currentCard.options.includes(value)) {
-        return { ok: false, error: "INVALID_OPTION" };
-      }
-
-      this.answers[playerId] = value;
-      const everyoneAnswered = this.host.players.length >= 2 && this.host.players.every((pl) => this.answers[pl.id]);
-
-      if (everyoneAnswered) {
-        this.phase = "REVEAL";
-        this.reveal = this.computeReveal();
-      }
-      return { ok: true };
+    if (action !== "answer") return { ok: false, error: "UNKNOWN_ACTION" };
+    if (this.finished || this.phase !== "QUESTION") return { ok: false, error: "WRONG_PHASE" };
+    if (this.answers[playerId]) return { ok: false, error: "ALREADY_ANSWERED" };
+    if (!this.host.players.find((pl) => pl.id === playerId)) return { ok: false, error: "NOT_IN_ROOM" };
+    if (this.deadline !== null && this.host.now() > this.deadline + LATENCY_GRACE_MS) {
+      return { ok: false, error: "TOO_LATE" };
     }
-    return { ok: false, error: "UNKNOWN_ACTION" };
+
+    const value = String((payload as { value?: unknown })?.value ?? "").trim();
+    if (!value || value.length > 200) return { ok: false, error: "INVALID_ANSWER" };
+    if (this.currentCard && this.currentCard.options.length > 0 && !this.currentCard.options.includes(value)) {
+      return { ok: false, error: "INVALID_OPTION" };
+    }
+
+    this.answers[playerId] = value;
+    this.answerTimes[playerId] = this.host.now() - this.questionStartedAt;
+
+    const everyoneAnswered = this.host.players.length >= 2 && this.host.players.every((pl) => this.answers[pl.id]);
+    if (everyoneAnswered) this.doReveal([]);
+    return { ok: true };
   }
 
-  next(playerId: string): ActionResult {
+  /** Fin du chrono : les retardataires sont marqués « temps écoulé ». */
+  onTimeout(): ActionResult {
+    if (this.finished || this.phase !== "QUESTION" || this.deadline === null) return { ok: false, error: "NO_TIMER" };
+    if (this.host.now() < this.deadline) return { ok: false, error: "TOO_EARLY" };
+    const late = this.host.players.filter((p) => !this.answers[p.id]).map((p) => p.id);
+    for (const id of late) this.answers[id] = TIMEOUT_ANSWER;
+    this.doReveal(late);
+    return { ok: true };
+  }
+
+  getDeadline(): number | null {
+    return this.phase === "QUESTION" && !this.finished ? this.deadline : null;
+  }
+
+  next(_playerId: string): ActionResult {
     if (this.finished) return { ok: false, error: "ALREADY_FINISHED" };
     if (this.phase !== "REVEAL") return { ok: false, error: "NOT_REVEALED_YET" };
 
     this.answers = {};
+    this.answerTimes = {};
     this.reveal = null;
     this.round += 1;
 
     if (this.round > this.host.totalRounds || this.round - 1 >= this.deck.length) {
       this.finished = true;
-      this.phase = "REVEAL";
+      this.deadline = null;
+      this.round = Math.min(this.round, this.host.totalRounds);
       return { ok: true };
     }
 
@@ -99,8 +135,10 @@ export class StandardRules implements Ruleset {
       question: this.currentCard
         ? { cardId: this.currentCard.id, prompt: this.currentCard.content, options: this.currentCard.options, index: this.round - 1 }
         : null,
-      answeredPlayerIds: Object.keys(this.answers),
+      // on ne dit pas QUOI l'autre a répondu avant la révélation, seulement QU'il a répondu
+      answeredPlayerIds: this.phase === "QUESTION" ? Object.keys(this.answers) : this.host.players.map((p) => p.id),
       reveal: this.reveal,
+      deadline: this.getDeadline(),
     };
   }
 
@@ -118,20 +156,75 @@ export class StandardRules implements Ruleset {
     const card = this.deck[round - 1];
     if (!card) return false;
     this.currentCard = card;
+    this.questionStartedAt = this.host.now();
+    this.deadline = this.timerMs ? this.questionStartedAt + this.timerMs : null;
     return true;
   }
 
-  private computeReveal(): StandardReveal {
-    const values = Object.values(this.answers);
-    const isMatch = values.length >= 2 && values[0] === values[1];
+  /**
+   * Questions « Qui de nous deux ? » : chacun répond de SON point de vue.
+   * « MOI » chez Awa et « MON PARTENAIRE » chez Moussa désignent la même
+   * personne (Awa) -> c'est une concordance, pas une divergence.
+   */
+  private isPerspectiveCard(): boolean {
+    const opts = this.currentCard?.options ?? [];
+    return opts.length === 2 && opts.includes(ME) && opts.includes(PARTNER);
+  }
+
+  private resolveTarget(playerId: string, value: string): string | null {
+    if (value === ME) return playerId;
+    if (value === PARTNER) return this.host.players.find((p) => p.id !== playerId)?.id ?? null;
+    return null;
+  }
+
+  private doReveal(timedOut: string[]) {
+    this.phase = "REVEAL";
+    this.deadline = null;
+    this.reveal = this.computeReveal(timedOut);
+  }
+
+  private computeReveal(timedOut: string[]): StandardReveal {
+    const players = this.host.players;
+    const perspective = this.isPerspectiveCard();
+    const display: Record<string, string> = {};
+    const normalized: Record<string, string> = {};
+
+    for (const p of players) {
+      const raw = this.answers[p.id] ?? TIMEOUT_ANSWER;
+      if (timedOut.includes(p.id)) {
+        display[p.id] = TIMEOUT_ANSWER;
+        continue;
+      }
+      if (perspective) {
+        const target = this.resolveTarget(p.id, raw);
+        normalized[p.id] = target ?? raw;
+        display[p.id] = players.find((pl) => pl.id === target)?.displayName ?? raw;
+      } else {
+        normalized[p.id] = raw.toLowerCase();
+        display[p.id] = raw;
+      }
+    }
+
+    const values = players.map((p) => normalized[p.id]);
+    const isMatch = timedOut.length === 0 && values.length >= 2 && values[0] !== undefined && values.every((v) => v === values[0]);
 
     const scoreDelta: Record<string, number> = {};
-    for (const playerId of this.host.players.map((p) => p.id)) scoreDelta[playerId] = 0;
+    for (const p of players) scoreDelta[p.id] = 0;
+
+    let fastestPlayerId: string | null = null;
+    if (this.timerMs && timedOut.length === 0 && players.length >= 2) {
+      const sorted = [...players].sort((a, b) => (this.answerTimes[a.id] ?? Infinity) - (this.answerTimes[b.id] ?? Infinity));
+      if ((this.answerTimes[sorted[0].id] ?? 0) !== (this.answerTimes[sorted[1].id] ?? 0)) fastestPlayerId = sorted[0].id;
+    }
 
     if (this.host.scoringEnabled && isMatch) {
-      for (const playerId of this.host.players.map((p) => p.id)) {
-        scoreDelta[playerId] = POINTS_PER_MATCH;
-        this.host.addScore(playerId, POINTS_PER_MATCH);
+      for (const p of players) {
+        scoreDelta[p.id] = POINTS_PER_MATCH;
+        this.host.addScore(p.id, POINTS_PER_MATCH);
+      }
+      if (this.speedBonus && fastestPlayerId) {
+        scoreDelta[fastestPlayerId] += SPEED_BONUS;
+        this.host.addScore(fastestPlayerId, SPEED_BONUS);
       }
     }
 
@@ -144,7 +237,14 @@ export class StandardRules implements Ruleset {
       this.currentStreak = 0;
     }
 
-    return { answers: { ...this.answers }, isMatch, scoreDelta };
+    this.recap.push({
+      round: this.round,
+      prompt: this.currentCard?.content ?? "",
+      answers: { ...display },
+      isMatch,
+    });
+
+    return { answers: { ...this.answers }, display, isMatch, scoreDelta, timedOut, fastestPlayerId };
   }
 
   private computeResult(): RoomResultSummary {
@@ -164,6 +264,8 @@ export class StandardRules implements Ruleset {
       totalAnswers,
       bestStreak: this.bestStreak,
       summaryLabel,
+      verdict: verdictFor(coupleScorePct, totalAnswers),
+      rounds: [...this.recap],
     };
   }
 }

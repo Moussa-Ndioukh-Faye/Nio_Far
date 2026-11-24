@@ -32,6 +32,15 @@ export const chatMessageSchema = z.object({
   text: z.string().trim().min(1).max(500),
 });
 
+export const chatTypingSchema = z.object({
+  roomId: z.string(),
+  typing: z.boolean(),
+});
+
+export const roomOnlySchema = z.object({
+  roomId: z.string(),
+});
+
 export const reconnectSchema = z.object({
   roomId: z.string(),
   playerId: z.string(),
