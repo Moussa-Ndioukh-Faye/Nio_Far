@@ -167,6 +167,16 @@ nouvelles, désactive celles retirées et ne supprime jamais rien.
 Le contenu Action ou Vérité / Questions de couple est dans
 `server/prisma/content/couple.ts` (3 niveaux).
 
+### Frontend sur Vercel
+
+1. vercel.com → **Add New… → Project** → importer `Moussa-Ndioukh-Faye/Nio_Far`
+2. **Root Directory** : `client` (framework Vite détecté, `client/vercel.json` fait le reste)
+3. **Environment Variables** : `VITE_SERVER_URL = https://nio-far-server.onrender.com`
+4. **Deploy**, puis ajouter l'adresse Vercel à `CLIENT_URL` sur Render
+   (plusieurs adresses possibles, séparées par des virgules).
+
+Ensuite chaque push sur `main` redéploie le frontend automatiquement.
+
 ## Design et normes
 
 Voir **DESIGN.md** : identité, jetons, composants, et normes respectées
