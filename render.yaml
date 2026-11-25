@@ -1,31 +1,30 @@
-# Blueprint Render — backend NIO FAR + base de données (Socket.IO solidaire)
-# Lis au préalable : https://render.com/docs/blueprint-spec
+# Blueprint Render — backend NIO FAR + base de données
+# Spécification : https://render.com/docs/blueprint-spec
 
 databases:
-  - name: niofar-db
-    plan: free # Postgres managé — pense à le passer en paid après 30 jours, sinon il expire
+  - name: nio-far-db
+    plan: free # ⚠️ l'offre gratuite Render expire après 30 jours (passer en payant ou migrer avant)
+    region: frankfurt
+    postgresMajorVersion: "16"
 
 services:
   - type: web
     name: nio-far-server
     runtime: node
+    plan: free # ⚠️ le plan gratuit se met en veille après ~15 min sans visite (réveil ~30 s)
+    region: frankfurt
     rootDir: server
-    plan: starter # le free "sleeps" : les WebSocket tombent après ~15 min d'inactivité
     buildCommand: npm install && npx prisma generate && npm run build
-    # Le seed ne s'exécute que si la table GameCard est vide (aucune donnée effacée au redémarrage)
+    # Migrations, puis synchronisation du contenu (ajoute / désactive, ne supprime rien)
     startCommand: npx prisma migrate deploy && npx prisma db seed && node dist/server.js
     healthCheckPath: /api/health
     envVars:
       - key: NODE_VERSION
         value: "20"
-      - key: PORT
-        value: "4000"
       - key: DATABASE_URL
         fromDatabase:
-          name: niofar-db
+          name: nio-far-db
           property: connectionString
-      - key: JWT_SECRET
-        generateValue: true
+      # Adresses du frontend autorisées, séparées par des virgules
       - key: CLIENT_URL
-        value: https://nio-far.netlify.app
-    # ⚠️ Remplacer CLIENT_URL par l'URL Netlify réelle (Settings > Site. URL) après création
+        value: https://nio-far.netlify.app,https://nio-far.vercel.app
