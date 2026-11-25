@@ -129,7 +129,7 @@ export function TurnBasedGame({ state, playerId, act, next }: GameComponentProps
         <p className="font-display text-lg leading-snug text-sand">{card.content}</p>
         {view.submission?.text ? (
           <div className="rounded-2xl border border-saffron/30 bg-saffron/5 px-4 py-3">
-            <p className="mb-1 text-[0.65rem] uppercase tracking-widest text-mute">
+            <p className="mb-1 text-xs uppercase tracking-widest text-mute">
               Réponse de {isMyTurn ? "toi" : turnPlayer?.displayName}
             </p>
             <p className="whitespace-pre-wrap text-paper">{view.submission.text}</p>
@@ -189,7 +189,9 @@ export function TurnBasedGame({ state, playerId, act, next }: GameComponentProps
             </Waiting>
           ) : written ? (
             <div className="flex flex-col gap-3">
+              <label htmlFor="turn-answer" className="sr-only">Ta réponse</label>
               <textarea
+                id="turn-answer"
                 value={text}
                 onChange={(e) => setText(e.target.value)}
                 maxLength={500}
@@ -197,7 +199,7 @@ export function TurnBasedGame({ state, playerId, act, next }: GameComponentProps
                 placeholder="Ta réponse, en toute sincérité…"
                 className="field resize-none"
               />
-              <div className="flex items-center justify-between text-[0.65rem] text-mute">
+              <div className="flex items-center justify-between text-xs text-mute">
                 <span>{judge?.displayName ?? "Ton/ta partenaire"} lira et validera.</span>
                 <span className="tabular-nums">{text.length}/500</span>
               </div>
@@ -272,7 +274,7 @@ export function TurnBasedGame({ state, playerId, act, next }: GameComponentProps
             >
               <span className="text-4xl">{c.emoji}</span>
               <span className="font-display text-xl font-black text-paper">{c.label}</span>
-              <span className="text-[0.7rem] leading-snug text-sand">{c.hint}</span>
+              <span className="text-xs leading-snug text-sand">{c.hint}</span>
             </motion.button>
           );
         })}

@@ -46,7 +46,9 @@ export function Mark({ size = 46, className = "" }: MarkProps) {
 export function Wordmark({ className = "", underline = true }: { className?: string; underline?: boolean }) {
   return (
     <span className={`relative inline-block font-display font-bold leading-none tracking-tight ${className}`}>
-      <span className="text-white">
+      {/* lecteurs d'écran : « NIO FAR » (le « ı » sans point et le cœur sont décoratifs) */}
+      <span className="sr-only">NIO FAR</span>
+      <span aria-hidden className="text-white">
         N<span className="relative inline-block">
           ı
           <svg viewBox="0 0 24 22" aria-hidden className="absolute left-1/2 top-[-0.02em] h-[0.3em] w-[0.33em] -translate-x-1/2">
@@ -55,7 +57,7 @@ export function Wordmark({ className = "", underline = true }: { className?: str
         </span>
         o
       </span>{" "}
-      <span className="text-gradient">far</span>
+      <span aria-hidden className="text-gradient">far</span>
       {underline && (
         <svg viewBox="0 0 200 14" preserveAspectRatio="none" aria-hidden className="absolute -bottom-[0.18em] left-[8%] h-[0.16em] w-[92%]">
           <path d="M2 12 C 50 2, 130 -1, 198 7 C 130 4, 60 6, 2 12 Z" fill="rgb(var(--acc))" />

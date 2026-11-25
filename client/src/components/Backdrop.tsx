@@ -14,13 +14,13 @@ const HEARTS = [
 export function Backdrop() {
   return (
     <div aria-hidden className="pointer-events-none fixed inset-0 -z-10 overflow-hidden bg-ink">
-      <div className="absolute -left-[20%] -top-[18%] h-[70vmax] w-[70vmax] animate-aurora rounded-full bg-[radial-gradient(circle,rgb(var(--acc)/0.32),transparent_62%)] blur-2xl" />
+      <div className="absolute -left-[20%] -top-[18%] h-[70vmax] w-[70vmax] animate-aurora rounded-full bg-[radial-gradient(circle,rgb(var(--acc)/0.32),transparent_62%)] will-change-transform" />
       <div
-        className="absolute -right-[25%] top-[10%] h-[60vmax] w-[60vmax] animate-aurora rounded-full bg-[radial-gradient(circle,rgba(124,58,237,0.26),transparent_60%)] blur-2xl"
+        className="absolute -right-[25%] top-[10%] h-[60vmax] w-[60vmax] animate-aurora rounded-full bg-[radial-gradient(circle,rgba(124,58,237,0.26),transparent_60%)] will-change-transform"
         style={{ animationDelay: "-8s" }}
       />
       <div
-        className="absolute -bottom-[30%] left-[10%] h-[65vmax] w-[65vmax] animate-aurora rounded-full bg-[radial-gradient(circle,rgb(var(--acc-2)/0.2),transparent_60%)] blur-2xl"
+        className="absolute -bottom-[30%] left-[10%] h-[65vmax] w-[65vmax] animate-aurora rounded-full bg-[radial-gradient(circle,rgb(var(--acc-2)/0.2),transparent_60%)] will-change-transform"
         style={{ animationDelay: "-15s" }}
       />
       {HEARTS.map((h, i) => (

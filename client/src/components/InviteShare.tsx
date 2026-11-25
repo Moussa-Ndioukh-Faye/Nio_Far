@@ -29,10 +29,9 @@ export function InviteShare({ code, link }: Props) {
       <button
         onClick={() => copy("code")}
         className="group mx-auto rounded-2xl border border-dashed border-saffron/50 px-5 py-3 transition hover:bg-saffron/5"
-        aria-label="Copier le code"
       >
         <span className="font-display text-4xl font-bold tracking-[0.14em] text-saffron">{code}</span>
-        <span className="mt-1 block text-[0.65rem] uppercase tracking-widest text-mute group-hover:text-sand">
+        <span aria-live="polite" className="mt-1 block text-xs uppercase tracking-widest text-mute group-hover:text-sand">
           {copied === "code" ? "Code copié ✓" : "Toucher pour copier"}
         </span>
       </button>

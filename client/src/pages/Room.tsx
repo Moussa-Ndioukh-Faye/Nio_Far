@@ -8,7 +8,7 @@ import { InviteShare } from "../components/InviteShare";
 import { Confetti } from "../components/Confetti";
 import { getGameComponent } from "../games/registry";
 import { getCatalogEntry, CATEGORY_GLYPHS, DIFFICULTY_LABELS } from "../data/catalog";
-import { FinishedView, PlayerState, RoundRecap, SessionPublicState } from "../types";
+import { FinishedView, PlayerState, RoundRecap, SessionPublicState, StandardView, TurnBasedView } from "../types";
 
 const NAME_KEY = "niofar_name";
 
@@ -79,7 +79,7 @@ export function Room() {
 
   if (!inThisRoom && !restoring && urlCode) {
     return (
-      <div className="mx-auto flex min-h-screen w-full max-w-md flex-col justify-center px-6 py-10">
+      <main className="mx-auto flex min-h-screen w-full max-w-md flex-col justify-center px-6 py-10">
         <motion.div
           initial={{ opacity: 0, y: 12 }}
           animate={{ opacity: 1, y: 0 }}
@@ -91,7 +91,9 @@ export function Room() {
             Tu as été invité(e) à la partie{" "}
             <span className="font-display font-bold tracking-[0.18em] text-saffron">{urlCode}</span>
           </p>
+          <label htmlFor="invite-name" className="sr-only">Ton prénom</label>
           <input
+            id="invite-name"
             value={joinName}
             onChange={(e) => setJoinName(e.target.value)}
             onKeyDown={(e) => { if (e.key === "Enter") handleInviteJoin(); }}
@@ -100,7 +102,7 @@ export function Room() {
             className="field text-center"
             autoFocus
           />
-          {joinError && <p className="text-sm text-bissap">{joinError}</p>}
+          {joinError && <p role="alert" className="text-sm text-bissap">{joinError}</p>}
           <button
             onClick={handleInviteJoin}
             disabled={!joinName.trim() || joining}
@@ -108,23 +110,27 @@ export function Room() {
           >
             {joining ? "Connexion…" : "Rejoindre la partie"}
           </button>
-          <button onClick={leave} className="text-xs text-mute underline-offset-4 hover:text-sand hover:underline">
+          <button onClick={leave} className="min-h-11 px-4 text-sm text-mute underline-offset-4 hover:text-sand hover:underline">
             Retour à l'accueil
           </button>
+          <p className="text-xs text-mute">
+            En rejoignant, ton prénom, tes réponses et tes messages sont partagés avec ton/ta partenaire et effacés sous 30 jours.{" "}
+            <a href="/confidentialite" className="text-sand underline underline-offset-2">En savoir plus</a>
+          </p>
         </motion.div>
-      </div>
+      </main>
     );
   }
 
   if (!state || !inThisRoom) {
     return (
-      <div className="flex min-h-screen flex-col items-center justify-center gap-4 p-8 text-center text-sand">
+      <main className="flex min-h-screen flex-col items-center justify-center gap-4 p-8 text-center text-sand" aria-busy="true">
         <Mark size={52} />
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-3" role="status">
           <span className="h-5 w-5 animate-spin rounded-full border-2 border-saffron border-t-transparent" />
           Connexion à la partie…
         </div>
-      </div>
+      </main>
     );
   }
 
@@ -142,24 +148,33 @@ export function Room() {
     <div className="mx-auto flex min-h-screen w-full max-w-md flex-col px-4 pb-6 pt-5">
       {/* ---- En-tête ---- */}
       <header className="mb-5 flex items-center justify-between gap-3">
-        <button onClick={leave} className="flex min-w-0 items-center gap-3 text-left" aria-label="Quitter et revenir à l'accueil">
+        <button onClick={leave} className="flex min-h-11 min-w-0 items-center gap-3 text-left" title="Quitter et revenir à l'accueil">
           <Mark size={40} />
           <div className="min-w-0">
-            <h1 className="text-xl">
+            <p className="text-xl">
               <Wordmark underline={false} />
-            </h1>
-            <p className="mt-1 truncate text-[0.65rem] uppercase tracking-[0.2em] text-mute">
+              <span className="sr-only">, retour à l'accueil</span>
+            </p>
+            <p className="mt-1 truncate text-xs uppercase tracking-[0.2em] text-mute">
               {CATEGORY_GLYPHS[meta.category]} {catalog?.name ?? meta.gameType} · {DIFFICULTY_LABELS[meta.difficulty]}
             </p>
           </div>
         </button>
-        <span className="shrink-0 whitespace-nowrap rounded-lg border border-saffron/40 bg-saffron/10 px-2.5 py-1 font-display text-sm font-bold tracking-[0.16em] text-saffron">
+        <span aria-label={`Code de la partie : ${meta.code.split("").join(" ")}`} className="shrink-0 whitespace-nowrap rounded-lg border border-saffron/40 bg-saffron/10 px-2.5 py-1 font-display text-sm font-bold tracking-[0.16em] text-saffron">
           {meta.code}
         </span>
       </header>
 
+      <main className="flex flex-1 flex-col">
+      <h1 className="sr-only">
+        {catalog?.name ?? meta.gameType} — partie {meta.code}
+      </h1>
+      <p className="sr-only" aria-live="polite" aria-atomic="true">
+        {announce(state, playerId)}
+      </p>
+
       {/* ---- Joueurs ---- */}
-      <div className="mb-4 grid grid-cols-2 gap-2.5">
+      <ul className="mb-4 grid grid-cols-2 gap-2.5" aria-label="Joueurs">
         <PresenceBadge
           name={me?.displayName ?? "Moi"}
           isConnected={selfStatus === "online"}
@@ -178,7 +193,7 @@ export function Room() {
           active={meta.family === "TURN_BASED" && meta.status === "PLAYING" && !!partner && meta.turnPlayerId === partner.id}
           placeholder={!partner}
         />
-      </div>
+      </ul>
 
       <AnimatePresence>
         {selfStatus === "reconnecting" && (
@@ -225,30 +240,39 @@ export function Room() {
 
       {/* ---- Chat ---- */}
       {partner && (
-        <section className="mt-6 flex flex-col gap-2.5">
+        <section className="mt-6 flex flex-col gap-2.5" aria-label="Chat">
           <button
             onClick={() => setChatOpen((o) => !o)}
-            className="flex items-center justify-between text-left"
+            className="flex min-h-11 items-center justify-between text-left"
             aria-expanded={chatOpen}
+            aria-controls="chat-panel"
           >
             <span className="eyebrow flex items-center gap-2">
               Chat · murmures
               {unread > 0 && (
-                <span className="rounded-full bg-clay px-1.5 py-0.5 text-[0.6rem] tracking-normal text-paper">{unread}</span>
+                <span className="rounded-full bg-clay px-1.5 py-0.5 text-xs tracking-normal text-paper">{unread}</span>
               )}
             </span>
-            <span className="text-xs text-mute">{chatOpen ? "Masquer ▴" : "Afficher ▾"}</span>
+            <span className="text-sm text-mute">{chatOpen ? "Masquer" : "Afficher"}</span>
           </button>
           <AnimatePresence initial={false}>
             {chatOpen && (
               <motion.div
+                id="chat-panel"
                 initial={{ height: 0, opacity: 0 }}
                 animate={{ height: "auto", opacity: 1 }}
                 exit={{ height: 0, opacity: 0 }}
                 className="flex flex-col gap-2.5 overflow-hidden"
               >
                 <div className="card flex h-52 flex-col overflow-hidden p-3">
-                  <div ref={chatScrollRef} className="flex flex-1 flex-col gap-2 overflow-y-auto pr-1">
+                  <div
+                    ref={chatScrollRef}
+                    className="flex flex-1 flex-col gap-2 overflow-y-auto pr-1"
+                    role="log"
+                    aria-live="polite"
+                    aria-label="Messages"
+                    tabIndex={0}
+                  >
                     {messages.length === 0 && (
                       <p className="m-auto text-center text-xs italic text-mute">Dis quelque chose de doux, ou lâche une vérité.</p>
                     )}
@@ -265,7 +289,7 @@ export function Room() {
                           className={`flex flex-col ${mine ? "items-end" : "items-start"}`}
                         >
                           {!grouped && (
-                            <span className="mb-0.5 px-1 text-[0.6rem] uppercase tracking-widest text-mute">
+                            <span className="mb-0.5 px-1 text-xs uppercase tracking-widest text-mute">
                               {mine ? "toi" : from?.displayName ?? "?"} · {formatTime(m.createdAt)}
                             </span>
                           )}
@@ -325,8 +349,8 @@ export function Room() {
                     className="field"
                     aria-label="Message"
                   />
-                  <button type="submit" disabled={!chatText.trim()} className="btn-clay shrink-0 px-4" aria-label="Envoyer le message">
-                    ➤
+                  <button type="submit" disabled={!chatText.trim()} className="btn-clay w-12 shrink-0 px-0" aria-label="Envoyer le message">
+                    <span aria-hidden>➤</span>
                   </button>
                 </form>
               </motion.div>
@@ -334,8 +358,33 @@ export function Room() {
           </AnimatePresence>
         </section>
       )}
+      </main>
     </div>
   );
+}
+
+/** Phrase lue par les lecteurs d'écran quand l'état de la partie change. */
+function announce(state: SessionPublicState, playerId: string | null): string {
+  const { meta, view } = state;
+  const partner = meta.players.find((p) => p.id !== playerId);
+  const name = partner?.displayName ?? "Ton/ta partenaire";
+  if (meta.status === "WAITING") return partner ? `${name} a rejoint la partie.` : "En attente de ton/ta partenaire.";
+  if (meta.status === "READY") return "Vous êtes prêts tous les deux.";
+  if (meta.status === "ABANDONED") return "La partie a été abandonnée.";
+  if (!view) return "";
+  if (view.kind === "FINISHED") return `Partie terminée. ${view.result.coupleScorePct} pour cent. ${view.result.verdict}`;
+  if (view.kind === "STANDARD") {
+    const v = view as StandardView;
+    if (v.phase === "REVEAL" && v.reveal) return `Révélation : ${v.reveal.isMatch ? "vous êtes en phase" : "réponses différentes"}.`;
+    return `Question ${v.round} sur ${v.totalRounds} : ${v.question?.prompt ?? ""}`;
+  }
+  const t = view as TurnBasedView;
+  const mine = t.turnPlayerId === playerId;
+  if (t.phase === "CHOOSE") return mine ? "C'est ton tour : choisis ta carte." : `${name} choisit sa carte.`;
+  if (t.phase === "CARD") return mine ? `À toi : ${t.card?.content ?? ""}` : `${name} relève la carte.`;
+  if (t.phase === "JUDGE") return t.judgePlayerId === playerId ? "À toi de valider la réponse." : `${name} valide ta réponse.`;
+  if (t.phase === "RESOLVED") return t.resolution?.result === "DONE" ? "Carte validée." : t.resolution?.result === "REJECTED" ? "Carte refusée." : "Carte passée.";
+  return "";
 }
 
 function Banner({ tone, children }: { tone: "bissap" | "saffron"; children: React.ReactNode }) {
@@ -390,7 +439,7 @@ function WaitingRoom({
     <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="card flex flex-col items-center gap-4 p-6 text-center">
       <p className="font-display text-2xl font-black text-paper">💞 Vous êtes là tous les deux</p>
       {description && <p className="text-sm text-sand">{description}</p>}
-      <div className="flex flex-wrap justify-center gap-2 text-[0.7rem] uppercase tracking-widest text-mute">
+      <div className="flex flex-wrap justify-center gap-2 text-xs uppercase tracking-widest text-mute">
         <span className="rounded-full border border-line px-2.5 py-1">{meta.totalRounds} manches</span>
         {meta.timerSeconds && <span className="rounded-full border border-line px-2.5 py-1">⏱️ {meta.timerSeconds} s / question</span>}
         {meta.family === "TURN_BASED" && <span className="rounded-full border border-line px-2.5 py-1">Chacun son tour</span>}
@@ -508,9 +557,9 @@ function FinishedScreen({
       {/* ---- Récap ---- */}
       {result.rounds?.length > 0 && (
         <div className="card p-4">
-          <button onClick={() => setShowRecap((s) => !s)} className="flex w-full items-center justify-between" aria-expanded={showRecap}>
+          <button onClick={() => setShowRecap((s) => !s)} className="flex min-h-11 w-full items-center justify-between" aria-expanded={showRecap}>
             <span className="eyebrow">Revoir la partie ({result.rounds.length})</span>
-            <span className="text-xs text-mute">{showRecap ? "▴" : "▾"}</span>
+            <span aria-hidden className="text-xs text-mute">{showRecap ? "▴" : "▾"}</span>
           </button>
           <AnimatePresence initial={false}>
             {showRecap && (
@@ -537,7 +586,7 @@ function Stat({ label, value, tone }: { label: string; value: number; tone: "lea
   return (
     <div className="rounded-2xl border border-line bg-ink/40 px-2 py-3">
       <p className={`font-display text-2xl font-black ${color}`}>{value}</p>
-      <p className="text-[0.6rem] uppercase tracking-widest text-mute">{label}</p>
+      <p className="text-xs uppercase tracking-widest text-mute">{label}</p>
     </div>
   );
 }

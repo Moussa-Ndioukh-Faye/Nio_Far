@@ -125,7 +125,8 @@ export function StandardGame({ state, playerId, act, next }: GameComponentProps)
             {remaining !== null && (
               <span
                 className={`font-display text-sm font-bold tabular-nums ${urgent ? "animate-pulse text-bissap" : "text-sand"}`}
-                aria-live="polite"
+                aria-label={`${Math.ceil(remaining / 1000)} secondes restantes`}
+                role="timer"
               >
                 ⏱️ {Math.ceil(remaining / 1000)} s
               </span>

@@ -27,7 +27,7 @@ export function PresenceBadge({ name, isConnected, isReady, isHost = false, scor
             : "En ligne";
 
   return (
-    <div
+    <li
       className={`card relative flex min-w-0 items-center gap-2.5 px-3 py-2.5 transition ${
         active ? "border-saffron/70 shadow-glowSaffron" : ""
       } ${placeholder ? "border-dashed opacity-70" : ""}`}
@@ -49,14 +49,20 @@ export function PresenceBadge({ name, isConnected, isReady, isHost = false, scor
       <div className="min-w-0 flex-1">
         <p className="flex items-center gap-1 truncate text-sm font-semibold text-paper">
           <span className="truncate">{name}</span>
-          {isHost && <span className="shrink-0 text-[0.65rem] text-saffron" title="Hôte">★</span>}
+          {isHost && (
+            <span className="shrink-0 text-xs text-saffron" title="Hôte de la partie">
+              <span aria-hidden>★</span>
+              <span className="sr-only">(hôte)</span>
+            </span>
+          )}
         </p>
-        <p className={`truncate text-[0.6rem] uppercase tracking-wider ${active ? "text-saffron" : "text-mute"}`}>
+        <p className={`truncate text-xs uppercase tracking-wider ${active ? "text-saffron" : "text-mute"}`}>
           {you ? `Toi · ${status}` : status}
         </p>
       </div>
       {score !== undefined && (
         <motion.div
+          aria-label={`${score} points`}
           key={score}
           initial={{ scale: 1.35 }}
           animate={{ scale: 1 }}
@@ -65,6 +71,6 @@ export function PresenceBadge({ name, isConnected, isReady, isHost = false, scor
           {score}
         </motion.div>
       )}
-    </div>
+    </li>
   );
 }

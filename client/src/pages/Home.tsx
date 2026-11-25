@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, useRef } from "react";
-import { useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { AnimatePresence, motion } from "framer-motion";
 import { Mark, Wordmark } from "../components/Mark";
 import { ACCENTS, applyAccent, savedAccent } from "../theme";
@@ -139,6 +139,9 @@ export function Home() {
 
   return (
     <div className="mx-auto flex min-h-screen w-full max-w-md flex-col px-4 pb-6 pt-8 md:max-w-3xl">
+      <a href="#contenu" className="sr-only focus:not-sr-only focus:fixed focus:left-3 focus:top-3 focus:z-[80] focus:rounded-xl focus:bg-ink2 focus:px-4 focus:py-2">
+        Aller au contenu
+      </a>
       {/* ---- Hero ---- */}
       <header className="mb-8 flex flex-col items-center gap-4 text-center">
         <motion.div initial={{ scale: 0.8, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} transition={{ type: "spring", stiffness: 200, damping: 14 }}>
@@ -149,15 +152,16 @@ export function Home() {
         <div>
           <h1 className="text-6xl">
             <Wordmark />
-            <span className="sr-only">NIO FAR</span>
           </h1>
           <p className="mt-5 font-display text-lg font-medium text-sand">Jouez. Découvrez-vous. Rapprochez-vous.</p>
-          <p className="mt-1 text-[0.68rem] uppercase tracking-[0.24em] text-mute">
+          <p className="mt-1 text-xs uppercase tracking-[0.24em] text-mute">
             {GAME_CATALOG.length} jeux · chacun sur son téléphone
           </p>
         </div>
         <InstallButton />
       </header>
+
+      <main id="contenu" className="flex flex-1 flex-col">
 
       <div className="flex flex-col gap-4 md:grid md:grid-cols-2">
         {/* ---- Prénom ---- */}
@@ -173,7 +177,7 @@ export function Home() {
             maxLength={24}
             autoComplete="given-name"
           />
-          <p className={`text-[0.7rem] ${nudgeName ? "text-saffron" : "text-mute"}`}>
+          <p className={`text-xs ${nudgeName ? "text-saffron" : "text-mute"}`}>
             {nudgeName ? "Entre ton prénom pour jouer 🙂" : "C'est ce que ton/ta partenaire verra."}
           </p>
         </section>
@@ -204,13 +208,14 @@ export function Home() {
               Rejoindre
             </button>
           </form>
-          <p className="text-[0.7rem] text-mute">Ou ouvre directement le lien d'invitation.</p>
+          <p className="text-xs text-mute">Ou ouvre directement le lien d'invitation.</p>
         </section>
       </div>
 
       <AnimatePresence>
         {error && (
           <motion.p
+            role="alert"
             initial={{ opacity: 0, y: -4 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0 }}
@@ -228,7 +233,7 @@ export function Home() {
           <span className="text-xs text-mute">{filtered.length} jeu{filtered.length > 1 ? "x" : ""}</span>
         </div>
 
-        <div className="-mx-4 mb-4 flex gap-2 overflow-x-auto px-4 pb-1 [scrollbar-width:none]" role="tablist" aria-label="Catégories">
+        <div className="-mx-4 mb-4 flex gap-2 overflow-x-auto px-4 pb-1 [scrollbar-width:none]" role="group" aria-label="Filtrer par catégorie">
           <Chip active={filter === null} onClick={() => setFilter(null)}>✨ Tous</Chip>
           {favorites.length > 0 && (
             <Chip active={filter === "FAVORIS"} onClick={() => setFilter("FAVORIS")}>❤️ Favoris</Chip>
@@ -240,7 +245,7 @@ export function Home() {
           ))}
         </div>
 
-        <motion.div layout className="grid grid-cols-2 gap-3 md:grid-cols-3">
+        <motion.ul layout className="grid grid-cols-2 gap-3 md:grid-cols-3" aria-label="Jeux">
           <AnimatePresence mode="popLayout">
             {gamesToShow.map((g, i) => (
               <GameCard
@@ -253,7 +258,7 @@ export function Home() {
               />
             ))}
           </AnimatePresence>
-        </motion.div>
+        </motion.ul>
 
         {!filter && filtered.length > PREVIEW_COUNT && (
           <button onClick={() => setShowAllGames((s) => !s)} className="btn-ghost mt-4 w-full py-2.5 text-sm">
@@ -275,7 +280,7 @@ export function Home() {
                   <span className="text-2xl">{g?.glyph ?? CATEGORY_GLYPHS[h.category] ?? "🎲"}</span>
                   <div className="min-w-0 flex-1">
                     <p className="truncate text-sm font-semibold text-paper">{g?.name ?? h.gameType.replace(/_/g, " ")}</p>
-                    <p className="truncate text-[0.68rem] text-sand">
+                    <p className="truncate text-xs text-sand">
                       {others} · {new Date(h.createdAt).toLocaleDateString("fr-FR", { day: "numeric", month: "short" })} ·{" "}
                       {STATUS_LABELS[h.status] ?? h.status}
                     </p>
@@ -298,10 +303,17 @@ export function Home() {
         </section>
       )}
 
+      </main>
+
       <footer className="mt-auto flex flex-col items-center gap-3 pt-12 text-center">
         <AccentPicker />
-        <p className="text-[0.65rem] uppercase tracking-[0.22em] text-mute">
-          NIO FAR · fait avec ❤️ à Dakar · © {new Date().getFullYear()}
+        <nav aria-label="Informations">
+          <Link to="/confidentialite" className="inline-flex min-h-11 items-center px-3 text-sm text-sand underline-offset-4 hover:text-paper hover:underline">
+            Confidentialité & données
+          </Link>
+        </nav>
+        <p className="text-xs uppercase tracking-[0.2em] text-mute">
+          NIO FAR · fait avec <span aria-label="amour">❤️</span> à Dakar · © {new Date().getFullYear()}
         </p>
       </footer>
 
@@ -322,8 +334,8 @@ export function Home() {
 function AccentPicker() {
   const [current, setCurrent] = useState(savedAccent);
   return (
-    <div className="glass flex items-center gap-2 rounded-full px-3 py-1.5" role="radiogroup" aria-label="Couleur de l'app">
-      <span className="text-[0.65rem] uppercase tracking-widest text-mute">Couleur</span>
+    <div className="glass flex items-center gap-0.5 rounded-full py-0.5 pl-4 pr-1" role="radiogroup" aria-label="Couleur de l'app">
+      <span aria-hidden className="mr-1 text-xs uppercase tracking-widest text-mute">Couleur</span>
       {ACCENTS.map((a) => (
         <button
           key={a.id}
@@ -332,9 +344,14 @@ function AccentPicker() {
           aria-label={a.label}
           title={a.label}
           onClick={() => setCurrent(applyAccent(a.id))}
-          className={`h-5 w-5 rounded-full transition ${current === a.id ? "ring-2 ring-white ring-offset-2 ring-offset-ink" : "opacity-70 hover:opacity-100"}`}
-          style={{ background: `linear-gradient(135deg, rgb(${a.acc}), rgb(${a.second}))` }}
-        />
+          className="flex h-11 w-11 items-center justify-center rounded-full"
+        >
+          <span
+            aria-hidden
+            className={`h-6 w-6 rounded-full transition ${current === a.id ? "ring-2 ring-white ring-offset-2 ring-offset-ink" : "opacity-70 hover:opacity-100"}`}
+            style={{ background: `linear-gradient(135deg, rgb(${a.acc}), rgb(${a.second}))` }}
+          />
+        </button>
       ))}
     </div>
   );
@@ -343,10 +360,9 @@ function AccentPicker() {
 function Chip({ active, onClick, children }: { active: boolean; onClick: () => void; children: React.ReactNode }) {
   return (
     <button
-      role="tab"
-      aria-selected={active}
+      aria-pressed={active}
       onClick={onClick}
-      className={`shrink-0 whitespace-nowrap rounded-full border px-3.5 py-1.5 text-xs font-semibold transition ${
+      className={`flex min-h-11 shrink-0 items-center whitespace-nowrap rounded-full border px-4 text-sm font-semibold transition ${
         active ? "border-saffron bg-saffron/15 text-saffron" : "border-line bg-ink2/60 text-sand hover:border-clay/50 hover:text-paper"
       }`}
     >
@@ -369,49 +385,39 @@ function GameCard({
   onOpen: () => void;
 }) {
   const accent = CATEGORY_ACCENTS[g.category];
+  const titleId = `game-${g.type}`;
   return (
-    <motion.div
+    <motion.li
       layout
       initial={{ opacity: 0, y: 16, rotateX: 18, filter: "blur(12px)" }}
       animate={{ opacity: 1, y: 0, rotateX: 0, filter: "blur(0px)", transition: { delay: Math.min(index, 10) * 0.04, duration: 0.55, ease: [0.22, 1, 0.36, 1] } }}
-      style={{ transformPerspective: 900 }}
       exit={{ opacity: 0, scale: 0.95 }}
-      whileHover={{ y: -3 }}
-      className={`card group relative flex cursor-pointer flex-col gap-2 overflow-hidden p-4 transition hover:${accent.ring} hover:shadow-lift`}
-      onClick={onOpen}
-      role="button"
-      tabIndex={0}
-      onKeyDown={(e) => {
-        if (e.key === "Enter" || e.key === " ") {
-          e.preventDefault();
-          onOpen();
-        }
-      }}
-      aria-label={`${g.name} — ${g.tagline}`}
+      style={{ transformPerspective: 900 }}
+      className="card group relative flex flex-col gap-2 overflow-hidden p-4 transition hover:-translate-y-0.5 hover:shadow-lift focus-within:ring-2 focus-within:ring-clay/70"
     >
       <div aria-hidden className={`pointer-events-none absolute inset-x-0 top-0 h-20 bg-gradient-to-b ${accent.glow} to-transparent opacity-70`} />
-      <div className="relative flex items-start justify-between">
-        <span className="text-3xl drop-shadow">{g.glyph}</span>
-        <button
-          onClick={(e) => {
-            e.stopPropagation();
-            onFav();
-          }}
-          className="-m-1 p-1 text-lg transition hover:scale-110"
-          aria-label={isFav ? "Retirer des favoris" : "Ajouter aux favoris"}
-          aria-pressed={isFav}
-        >
-          {isFav ? "❤️" : "🤍"}
+      <span aria-hidden className="relative text-3xl drop-shadow">{g.glyph}</span>
+      <h3 id={titleId} className="relative font-display text-base font-semibold leading-snug text-paper">
+        {/* le bouton couvre toute la carte (::after) : une seule cible, nom = texte visible */}
+        <button onClick={onOpen} className="text-left outline-none after:absolute after:inset-0 after:rounded-3xl after:content-['']">
+          {g.name}
         </button>
+      </h3>
+      <p className="relative line-clamp-2 text-xs leading-snug text-sand">{g.tagline}</p>
+      <div className="relative mt-auto flex flex-wrap items-center gap-1.5 pt-1">
+        <span className={`text-xs font-semibold uppercase tracking-wider ${accent.text}`}>{CATEGORY_LABELS[g.category]}</span>
+        {g.isNew && <span className="rounded-full bg-[rgb(var(--btn-1))] px-2 py-0.5 text-xs font-bold text-white">Nouveau</span>}
+        {g.timerSeconds && <span className="text-xs text-mute">⏱️ {g.timerSeconds} s</span>}
       </div>
-      <h3 className="relative font-display text-base font-bold leading-snug text-paper">{g.name}</h3>
-      <p className="relative line-clamp-2 text-[0.7rem] leading-snug text-sand">{g.tagline}</p>
-      <div className="relative mt-auto flex flex-wrap gap-1 pt-1">
-        <span className={`text-[0.58rem] font-semibold uppercase tracking-widest ${accent.text}`}>{CATEGORY_LABELS[g.category]}</span>
-        {g.isNew && <span className="rounded-full bg-clay px-1.5 text-[0.55rem] font-bold uppercase tracking-wider text-paper">Nouveau</span>}
-        {g.timerSeconds && <span className="text-[0.6rem] text-mute">· ⏱️ {g.timerSeconds}s</span>}
-      </div>
-    </motion.div>
+      <button
+        onClick={onFav}
+        className="absolute right-1.5 top-1.5 z-10 flex h-11 w-11 items-center justify-center rounded-full text-lg transition hover:scale-110 hover:bg-white/10"
+        aria-label={isFav ? `Retirer ${g.name} des favoris` : `Ajouter ${g.name} aux favoris`}
+        aria-pressed={isFav}
+      >
+        <span aria-hidden>{isFav ? "❤️" : "🤍"}</span>
+      </button>
+    </motion.li>
   );
 }
 
@@ -432,11 +438,38 @@ function GameSheet({
   onClose: () => void;
   onPlay: (g: GameCatalogEntry) => void;
 }) {
+  const sheetRef = useRef<HTMLDivElement>(null);
+  const [adult, setAdult] = useState(() => localStorage.getItem("niofar_adult") === "1");
+  const needsAdult = !!game && (difficulty === "INTENSE" || game.category === "FLIRT");
+  const blocked = needsAdult && !adult;
+
+  // Dialogue modal accessible : Échap ferme, Tab reste dans la fiche,
+  // le focus va sur le titre à l'ouverture et revient au bouton d'origine.
   useEffect(() => {
     if (!game) return;
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
+    const opener = document.activeElement as HTMLElement | null;
+    const t = setTimeout(() => sheetRef.current?.querySelector<HTMLElement>("[data-autofocus]")?.focus(), 50);
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+      if (e.key !== "Tab" || !sheetRef.current) return;
+      const items = [...sheetRef.current.querySelectorAll<HTMLElement>("button, input, [href], [tabindex]:not([tabindex='-1'])")].filter((el) => !el.hasAttribute("disabled"));
+      if (items.length === 0) return;
+      const first = items[0];
+      const last = items[items.length - 1];
+      if (e.shiftKey && document.activeElement === first) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && document.activeElement === last) {
+        e.preventDefault();
+        first.focus();
+      }
+    };
     window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
+    return () => {
+      clearTimeout(t);
+      window.removeEventListener("keydown", onKey);
+      opener?.focus?.();
+    };
   }, [game, onClose]);
 
   return (
@@ -453,6 +486,7 @@ function GameSheet({
           />
           <motion.div
             key="sheet"
+            ref={sheetRef}
             role="dialog"
             aria-modal="true"
             aria-labelledby="sheet-title"
@@ -468,48 +502,69 @@ function GameSheet({
           >
             <div className="mx-auto mb-5 h-1.5 w-12 rounded-full bg-line md:hidden" />
             <div className="flex items-start gap-4">
-              <span className="text-5xl">{game.glyph}</span>
+              <span aria-hidden className="text-5xl">{game.glyph}</span>
               <div className="min-w-0 flex-1">
-                <p className={`text-[0.65rem] font-semibold uppercase tracking-[0.22em] ${CATEGORY_ACCENTS[game.category].text}`}>
+                <p className={`text-xs font-semibold uppercase tracking-[0.22em] ${CATEGORY_ACCENTS[game.category].text}`}>
                   {CATEGORY_GLYPHS[game.category]} {CATEGORY_LABELS[game.category]}
                 </p>
-                <h2 id="sheet-title" className="font-display text-2xl font-black leading-tight text-paper">{game.name}</h2>
+                <h2 id="sheet-title" tabIndex={-1} data-autofocus className="font-display text-2xl font-bold leading-tight text-paper outline-none">
+                  {game.name}
+                </h2>
               </div>
-              <button onClick={onClose} className="-m-2 p-2 text-xl text-mute hover:text-paper" aria-label="Fermer">
-                ✕
+              <button onClick={onClose} className="-m-2 flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-xl text-mute hover:bg-white/10 hover:text-paper" aria-label="Fermer la fiche">
+                <span aria-hidden>✕</span>
               </button>
             </div>
             <p className="mt-4 text-sm leading-relaxed text-sand">{game.description}</p>
-            <div className="mt-3 flex flex-wrap gap-2 text-[0.65rem] uppercase tracking-widest text-mute">
+            <div className="mt-3 flex flex-wrap gap-2 text-xs uppercase tracking-widest text-mute">
               <span className="rounded-full border border-line px-2.5 py-1">{game.family === "TURN_BASED" ? "Chacun son tour" : "Réponses simultanées"}</span>
               {game.timerSeconds && <span className="rounded-full border border-line px-2.5 py-1">⏱️ {game.timerSeconds} s</span>}
               {game.scoringEnabled && <span className="rounded-full border border-line px-2.5 py-1">Points</span>}
             </div>
 
-            <p className="eyebrow mt-6 mb-2">Niveau</p>
-            <div className="grid grid-cols-3 gap-2">
+            <p id="niveau-label" className="eyebrow mt-6 mb-2">Niveau</p>
+            <div className="grid grid-cols-3 gap-2" role="radiogroup" aria-labelledby="niveau-label">
               {(["SOFT", "NORMAL", "INTENSE"] as Difficulty[]).map((d) => (
                 <button
                   key={d}
                   onClick={() => onDifficulty(d)}
-                  aria-pressed={difficulty === d}
+                  role="radio"
+                  aria-checked={difficulty === d}
                   className={`flex flex-col items-center gap-0.5 rounded-2xl border px-2 py-2.5 text-center transition ${
                     difficulty === d ? "border-saffron bg-saffron/15 text-saffron" : "border-line bg-ink/40 text-sand hover:border-clay/40"
                   }`}
                 >
                   <span className="text-sm font-semibold">
-                    {DIFFICULTY_GLYPHS[d]} {DIFFICULTY_LABELS[d]}
+                    <span aria-hidden>{DIFFICULTY_GLYPHS[d]}</span> {DIFFICULTY_LABELS[d]}
                   </span>
-                  <span className="text-[0.6rem] text-mute">≤ {game.rounds[d]} manches</span>
+                  <span className="text-xs text-mute">≤ {game.rounds[d]} manches</span>
                 </button>
               ))}
             </div>
             <p className="mt-2 text-center text-xs italic text-mute">{DIFFICULTY_HINTS[difficulty]}</p>
 
-            <button onClick={() => onPlay(game)} disabled={busy} className="btn-clay mt-5 w-full py-4 text-lg">
+            {needsAdult && (
+              <label className="mt-4 flex min-h-11 cursor-pointer items-start gap-3 rounded-2xl border border-white/10 bg-white/[0.04] p-3 text-sm text-sand">
+                <input
+                  type="checkbox"
+                  checked={adult}
+                  onChange={(e) => {
+                    setAdult(e.target.checked);
+                    if (e.target.checked) localStorage.setItem("niofar_adult", "1");
+                    else localStorage.removeItem("niofar_adult");
+                  }}
+                  className="mt-0.5 h-5 w-5 shrink-0 accent-[rgb(var(--acc))]"
+                />
+                <span>
+                  <strong className="text-paper">Je confirme avoir 18 ans ou plus.</strong> Ce contenu est réservé aux adultes.
+                </span>
+              </label>
+            )}
+
+            <button onClick={() => onPlay(game)} disabled={busy || blocked} className="btn-clay mt-5 w-full py-4 text-lg">
               {busy ? "Création…" : hasName ? "Créer la partie" : "Entre d'abord ton prénom"}
             </button>
-            <p className="mt-2 text-center text-[0.68rem] text-mute">Tu recevras un lien à envoyer à ton/ta partenaire.</p>
+            <p className="mt-2 text-center text-xs text-mute">Tu recevras un lien à envoyer à ton/ta partenaire.</p>
           </motion.div>
         </>
       )}
