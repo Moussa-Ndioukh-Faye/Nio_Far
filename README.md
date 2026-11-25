@@ -167,6 +167,12 @@ nouvelles, désactive celles retirées et ne supprime jamais rien.
 Le contenu Action ou Vérité / Questions de couple est dans
 `server/prisma/content/couple.ts` (3 niveaux).
 
+## Design et normes
+
+Voir **DESIGN.md** : identité, jetons, composants, et normes respectées
+(WCAG 2.2 AA, RGPD / loi 2008-12, OWASP). Audit : axe-core 0 violation sur
+13 écrans, Lighthouse accessibilité / bonnes pratiques / SEO = 100.
+
 ## PWA
 
 L'app s'installe sur l'écran d'accueil (Android, iOS, desktop) :
