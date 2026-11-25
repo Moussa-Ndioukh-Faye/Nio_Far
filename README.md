@@ -6,7 +6,7 @@ Plateforme de jeux multijoueurs en temps réel pour couples à distance.
 Chaque joueur se connecte depuis son propre appareil ; le serveur est la
 seule source de vérité (scores, réponses, état de partie).
 
-**24 jeux jouables**, répartis en 7 catégories, avec un moteur de jeu
+**25 jeux jouables**, répartis en 7 catégories, avec un moteur de jeu
 générique (2 familles de règles : STANDARD et TURN_BASED), du contenu
 seedé par niveau (SOFT/NORMAL/INTENSE), favoris et historique par
 appareil, et multijoueur à distance via Socket.IO.
@@ -141,14 +141,48 @@ Variables à définir en production : `DATABASE_URL`, `JWT_SECRET`,
 
 ## Tests
 
-Un dossier `server/src/__tests__` est prévu pour des tests unitaires du
-`GameEngine` (logique pure, facile à tester sans réseau). Recommandé :
-Vitest ou Jest. À ajouter dans une phase ultérieure (Phase 13).
+```bash
+cd server
+npm test        # Vitest : règles, moteur, et une vraie partie Socket.IO à 2 clients
+```
+
+Les tests n'ont pas besoin de PostgreSQL (contenu et persistance simulés).
+
+## Mécaniques de jeu
+
+- **Réponses simultanées** (STANDARD) : révélation quand les deux ont répondu.
+  Les questions « Qui de nous deux ? » (options `MOI` / `MON PARTENAIRE`)
+  sont comparées sur la personne désignée, pas sur le texte du bouton.
+- **Chrono** (Quiz chronométré 15 s, Duel de rapidité 7 s) : échéance gérée
+  par le serveur, réponses tardives refusées, bonus au plus rapide.
+- **Tour par tour** : le joueur répond par écrit (vérités, questions) ou
+  réalise l'action, puis **son/sa partenaire valide** — plus d'auto-validation.
+- **Revanche** dans la même room, **récap** de la partie, chat conservé
+  (100 derniers messages) et indicateur « est en train d'écrire ».
+
+## Contenu
+
+Le seed **synchronise** les cartes à chaque démarrage : il ajoute les
+nouvelles, désactive celles retirées et ne supprime jamais rien.
+Le contenu Action ou Vérité / Questions de couple est dans
+`server/prisma/content/couple.ts` (3 niveaux).
+
+## Design et normes
+
+Voir **DESIGN.md** : identité, jetons, composants, et normes respectées
+(WCAG 2.2 AA, RGPD / loi 2008-12, OWASP). Audit : axe-core 0 violation sur
+13 écrans, Lighthouse accessibilité / bonnes pratiques / SEO = 100.
+
+## PWA
+
+L'app s'installe sur l'écran d'accueil (Android, iOS, desktop) :
+manifest, icônes (`client/public/icons`), service worker généré par
+`vite-plugin-pwa`. Les mises à jour sont proposées (jamais imposées en
+pleine partie). L'API et le WebSocket ne passent jamais par le cache.
 
 ## Prochaines étapes (au-delà de ce scaffold)
 
 - Phase 6 (approfondir) : brancher les 3 mini-jeux au GameEngine générique déjà en place
-- Phase 10 : enrichir le chat (timestamps affichés, notifications, historique)
 - Phase 11 : renforcer la reconnexion (grace period configurable, présence Redis si scale horizontal)
 - Phase 12 : UI/UX premium + Framer Motion
 - Phase 13-14 : tests automatisés + déploiement production

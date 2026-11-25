@@ -3,73 +3,115 @@
 @tailwind utilities;
 
 @layer base {
-  html {
+  /* Accent : rose du logo -> corail du « far ». Modifiable via src/theme.ts */
+  :root {
+    --acc: 253 43 120;
+    --acc-deep: 224 17 95;
+    --acc-2: 254 77 79;
+    /* boutons pleins : versions plus profondes pour un contraste AA avec le blanc */
+    --btn-1: 219 26 99;
+    --btn-2: 217 54 60;
     color-scheme: dark;
   }
 
-  body {
-    @apply bg-ink text-paper font-sans antialiased;
-    background-image:
-      radial-gradient(1100px 620px at 18% -12%, rgba(199, 75, 47, 0.2), transparent 62%),
-      radial-gradient(900px 520px at 112% 24%, rgba(230, 168, 55, 0.09), transparent 58%),
-      radial-gradient(1000px 700px at 50% 115%, rgba(107, 143, 111, 0.08), transparent 60%),
-      repeating-linear-gradient(0deg, rgba(244, 233, 216, 0.028) 0 1px, transparent 1px 24px),
-      repeating-linear-gradient(90deg, rgba(244, 233, 216, 0.028) 0 1px, transparent 1px 24px);
-    background-attachment: fixed;
+  html {
+    background: #070113;
   }
 
-  body::after {
-    content: "";
-    position: fixed;
-    inset: 0;
-    pointer-events: none;
-    z-index: 60;
-    opacity: 0.5;
-    mix-blend-mode: overlay;
-    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.16'/%3E%3C/svg%3E");
+  body {
+    @apply text-paper font-sans antialiased;
+    /* pas de fond ici : il passerait devant le Backdrop (z-index négatif) */
+    background: transparent;
+    /* app installée (iOS barre de statut translucide) : on respecte les encoches */
+    padding: env(safe-area-inset-top) env(safe-area-inset-right) 0 env(safe-area-inset-left);
+    -webkit-tap-highlight-color: transparent;
+    overscroll-behavior-y: none;
+    min-height: 100dvh;
   }
 
   ::selection {
-    background: rgba(199, 75, 47, 0.85);
-    color: #f4e9d8;
+    background: rgb(var(--acc) / 0.85);
+    color: #fff;
   }
 
   :focus-visible {
-    outline: 2px solid rgba(230, 168, 55, 0.85);
+    outline: 2px solid rgb(var(--acc) / 0.9);
     outline-offset: 2px;
-    border-radius: 6px;
+    border-radius: 8px;
   }
 
   input,
   button,
-  select {
+  select,
+  textarea {
     font-family: inherit;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+    }
   }
 }
 
 @layer components {
-  .field {
-    @apply w-full rounded-2xl border border-line bg-ink2/80 px-4 py-3 text-paper placeholder:text-mute outline-none transition duration-200 focus:border-saffron/60 focus:shadow-glowSaffron focus:bg-ink2;
-  }
-
-  .btn {
-    @apply inline-flex items-center justify-center gap-2 rounded-2xl px-5 py-3 font-semibold transition duration-200 select-none disabled:cursor-not-allowed disabled:opacity-50;
-  }
-
-  .btn-clay {
-    @apply btn text-paper shadow-glowClay hover:bg-clayDeep active:translate-y-px;
-    background: linear-gradient(180deg, #d4573a, #b8482a);
-  }
-
-  .btn-ghost {
-    @apply btn border border-line bg-ink2/70 text-sand hover:border-clay/50 hover:text-paper hover:bg-ink3 active:translate-y-px;
-  }
-
-  .eyebrow {
-    @apply text-[0.7rem] font-semibold uppercase tracking-[0.28em] text-sand;
+  /* ---- Verre dépoli : la matière de toutes les surfaces ---- */
+  .glass {
+    background: linear-gradient(155deg, rgba(255, 255, 255, 0.11), rgba(255, 255, 255, 0.03));
+    -webkit-backdrop-filter: blur(40px) saturate(1.5);
+    backdrop-filter: blur(40px) saturate(1.5);
+    border: 1px solid rgba(255, 255, 255, 0.11);
   }
 
   .card {
-    @apply rounded-3xl border border-line bg-ink2/70 shadow-card backdrop-blur-sm;
+    @apply glass rounded-3xl shadow-card;
+  }
+
+  @media (prefers-reduced-transparency: reduce) {
+    .glass {
+      background: #1a0d2c;
+      -webkit-backdrop-filter: none;
+      backdrop-filter: none;
+    }
+  }
+
+  .field {
+    @apply w-full rounded-2xl border border-white/10 bg-white/[0.06] px-4 py-3 text-paper placeholder:text-mute outline-none transition duration-200 focus:border-clay/70 focus:bg-white/[0.09] focus:shadow-glowClay;
+  }
+
+  /* Cibles tactiles : 44 px minimum partout (Apple HIG / Material, WCAG 2.5.8) */
+  .btn {
+    @apply inline-flex min-h-11 items-center justify-center gap-2 rounded-2xl px-5 py-3 font-bold transition duration-200 select-none disabled:cursor-not-allowed disabled:opacity-45;
+  }
+
+  /* Bouton principal : le dégradé rose -> corail du logo */
+  .btn-clay {
+    @apply btn text-white shadow-glowClay hover:brightness-110 active:translate-y-px active:brightness-95;
+    background: linear-gradient(135deg, rgb(var(--btn-1)), rgb(var(--btn-2)));
+  }
+
+  .btn-ghost {
+    @apply btn glass text-sand hover:border-clay/50 hover:text-paper active:translate-y-px;
+  }
+
+  .eyebrow {
+    @apply font-display text-xs font-semibold uppercase tracking-[0.18em] text-sand;
+  }
+
+  /* Petite pastille d'information (statut, badge) : 12 px minimum */
+  .tag {
+    @apply inline-flex items-center rounded-full border border-white/10 px-2.5 py-1 text-xs font-semibold uppercase tracking-wider text-sand;
+  }
+
+  /* Texte en dégradé (le « far » du logo) */
+  .text-gradient {
+    background: linear-gradient(120deg, rgb(var(--acc)), rgb(var(--acc-2)));
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
   }
 }

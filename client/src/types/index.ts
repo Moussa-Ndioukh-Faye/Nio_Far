@@ -22,7 +22,8 @@ export type GameType =
   | "IMPOSSIBLE_CHOICE"
   | "COUPLE_BATTLE"
   | "TIMED_QUIZ"
-  | "SPEED_DUEL";
+  | "SPEED_DUEL"
+  | "COUPLE_QUESTIONS";
 
 export type Category =
   | "CONNAISSANCE"
@@ -64,9 +65,15 @@ export interface GameMeta {
   status: SessionStatus;
   scores: Record<string, number>;
   createdAt: number;
+  /** joueurs ayant demandé une revanche (écran de fin) */
+  rematchVotes: string[];
+  /** nombre de parties enchaînées dans cette room (revanches comprises) */
+  gamesPlayed: number;
+  /** secondes par question si le jeu est chronométré, sinon null */
+  timerSeconds: number | null;
 }
 
-// ---- Vues ----
+// ---- Vues par règles de jeu (le client rend exactement cette vue) ----
 
 export interface StandardQuestion {
   cardId: string;
@@ -76,9 +83,16 @@ export interface StandardQuestion {
 }
 
 export interface StandardReveal {
+  /** réponses brutes (option cliquée) */
   answers: Record<string, string>;
+  /** réponses lisibles : « MOI » / « MON PARTENAIRE » remplacés par le prénom visé */
+  display: Record<string, string>;
   isMatch: boolean;
   scoreDelta: Record<string, number>;
+  /** joueurs qui n'ont pas répondu à temps */
+  timedOut: string[];
+  /** joueur le plus rapide (jeux chronométrés, si les deux ont répondu) */
+  fastestPlayerId: string | null;
 }
 
 export interface StandardView {
@@ -89,6 +103,8 @@ export interface StandardView {
   question: StandardQuestion | null;
   answeredPlayerIds: string[];
   reveal: StandardReveal | null;
+  /** horodatage serveur (ms) de fin de la question chronométrée, sinon null */
+  deadline: number | null;
 }
 
 export interface TurnCard {
@@ -96,17 +112,36 @@ export interface TurnCard {
   content: string;
 }
 
+export type TurnResult = "DONE" | "PASS" | "REJECTED";
+
 export interface TurnBasedView {
   kind: "TURN_BASED";
   round: number;
   totalRounds: number;
   turnPlayerId: string | null;
-  phase: "CHOOSE" | "CARD" | "RESOLVED";
+  /** le partenaire qui valide (ou non) la carte du tour */
+  judgePlayerId: string | null;
+  phase: "CHOOSE" | "CARD" | "JUDGE" | "RESOLVED";
   options: string[];
   choseType: string | null;
   card: TurnCard | null;
-  resolution: { result: "DONE" | "PASS"; byPlayerId: string } | null;
+  /** réponse écrite du joueur dont c'est le tour (vérités / questions) */
+  submission: { text: string | null } | null;
+  resolution: { result: TurnResult; byPlayerId: string } | null;
   status: string;
+}
+
+export interface RoundRecap {
+  round: number;
+  prompt: string;
+  type?: string;
+  /** STANDARD : réponses lisibles par joueur */
+  answers?: Record<string, string>;
+  isMatch?: boolean;
+  /** TURN_BASED : joueur du tour, résultat et réponse écrite */
+  byPlayerId?: string;
+  result?: TurnResult;
+  text?: string | null;
 }
 
 export interface FinishedResult {
@@ -118,6 +153,9 @@ export interface FinishedResult {
   totalAnswers: number;
   bestStreak: number;
   summaryLabel: string;
+  /** petite phrase de verdict selon le score de complicité */
+  verdict: string;
+  rounds: RoundRecap[];
 }
 
 export interface FinishedView {
@@ -130,9 +168,12 @@ export type GameView = StandardView | TurnBasedView | FinishedView | null;
 export interface SessionPublicState {
   meta: GameMeta;
   view: GameView;
+  /** horloge serveur au moment de l'envoi, pour caler les chronos côté client */
+  serverNow: number;
 }
 
 export interface ChatMessage {
+  id: string;
   playerId: string;
   text: string;
   createdAt: number;
@@ -150,6 +191,10 @@ export interface GameCatalogEntry {
   family: GameFamily;
   scoringEnabled: boolean;
   rounds: Record<Difficulty, number>;
+  /** secondes par question si chronométré */
+  timerSeconds?: number;
+  /** badge « Nouveau » sur l'accueil */
+  isNew?: boolean;
 }
 
 // ---- Historique ----

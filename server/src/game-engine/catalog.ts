@@ -15,6 +15,10 @@ export interface GameCatalogEntry {
   cardType: string; // filtre sur GameCard.type ; "MIXED" = plusieurs types
   options: string[]; // options par défaut (jeux "question" standard)
   roundsByDifficulty: Record<Difficulty, number>;
+  /** secondes par question : rend le jeu chronométré (famille STANDARD) */
+  timerSeconds?: number;
+  /** bonus au plus rapide quand les réponses concordent */
+  speedBonus?: boolean;
 }
 
 export const CATEGORIES_ORDER: Category[] = [
@@ -184,7 +188,7 @@ export const GAME_CATALOG: GameCatalogEntry[] = [
     name: "Mime ton partenaire",
     category: "FUN",
     tagline: "Imite sans rire, c'est mission impossible.",
-    description: "Mime une situation ou une habitude de ton/ta partenaire. S'il/elle comprend, vous gagnez le tour.",
+    description: "Mime une habitude de ton/ta partenaire en appel vidéo. C'est lui/elle qui valide s'il/elle a deviné.",
     glyph: "🎬",
     family: "TURN_BASED",
     scoringEnabled: true,
@@ -336,6 +340,19 @@ export const GAME_CATALOG: GameCatalogEntry[] = [
     roundsByDifficulty: ROUNDS,
   },
   {
+    type: "COUPLE_QUESTIONS",
+    name: "Questions de couple",
+    category: "PROFOND",
+    tagline: "Parler de vous, vraiment.",
+    description: "Chacun son tour répond par écrit à une question sur votre couple ; l'autre valide quand la réponse le/la touche.",
+    glyph: "💬",
+    family: "TURN_BASED",
+    scoringEnabled: false,
+    cardType: "QUESTION",
+    options: ["QUESTION"],
+    roundsByDifficulty: { SOFT: 8, NORMAL: 10, INTENSE: 12 },
+  },
+  {
     type: "COUPLE_BATTLE",
     name: "Couple Battle",
     category: "COMPETITION",
@@ -352,27 +369,31 @@ export const GAME_CATALOG: GameCatalogEntry[] = [
     type: "TIMED_QUIZ",
     name: "Quiz chronométré",
     category: "COMPETITION",
-    tagline: "90 secondes pour être sur la même longueur.",
-    description: "Le rythme monte : répondez vite, comparez, validez.",
+    tagline: "15 secondes par question, pas une de plus.",
+    description: "Le chrono tourne : répondez avant la fin, soyez en phase. Le plus rapide des deux gagne un bonus.",
     glyph: "⏱️",
     family: "STANDARD",
     scoringEnabled: true,
     cardType: "QUESTION",
     options: [],
     roundsByDifficulty: ROUNDS,
+    timerSeconds: 15,
+    speedBonus: true,
   },
   {
     type: "SPEED_DUEL",
     name: "Duel de rapidité",
     category: "COMPETITION",
-    tagline: "Questions éclair, verdicts instantanés.",
-    description: "Enchaînez les questions courtes. Celui qui hésite doit valider la réponse de l'autre.",
+    tagline: "7 secondes. Celui qui hésite a perdu.",
+    description: "Questions éclair « Qui de nous deux ? » : soyez d'accord et rapides, le plus vif empoche le bonus.",
     glyph: "🌩️",
     family: "STANDARD",
     scoringEnabled: true,
     cardType: "QUESTION",
     options: [],
     roundsByDifficulty: ROUNDS,
+    timerSeconds: 7,
+    speedBonus: true,
   },
 ];
 

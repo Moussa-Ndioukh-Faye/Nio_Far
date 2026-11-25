@@ -1,5 +1,6 @@
 import { Router } from "express";
 import { prisma } from "../services/contentService";
+import { eraseDevice, RETENTION_DAYS } from "../services/retention";
 import { CATEGORIES_ORDER, CATEGORY_LABELS, CATEGORY_GLYPHS, DIFFICULTY_LABELS, GAME_CATALOG } from "../game-engine/catalog";
 
 export const router = Router();
@@ -74,6 +75,24 @@ router.get("/me/history", async (req, res) => {
         : null,
     })),
   });
+});
+
+// Droit à l'effacement (RGPD art. 17 / loi 2008-12 art. 68) : l'appareil
+// demande la suppression de toutes ses données côté serveur.
+router.delete("/me", async (req, res) => {
+  const deviceId = String(req.query.deviceId ?? "").trim();
+  if (!deviceId || deviceId.length < 8 || deviceId.length > 80) return res.status(400).json({ error: "MISSING_DEVICE_ID" });
+  try {
+    const deleted = await eraseDevice(deviceId);
+    res.json({ ok: true, deleted });
+  } catch {
+    res.status(500).json({ error: "ERASE_FAILED" });
+  }
+});
+
+// Informations publiques de confidentialité (affichées par le client)
+router.get("/privacy", (_req, res) => {
+  res.json({ retentionDays: RETENTION_DAYS });
 });
 
 // Utile pour un lien "voir le résultat" partagé après la partie.

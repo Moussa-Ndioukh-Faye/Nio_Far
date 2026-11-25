@@ -5,6 +5,7 @@ import {
   GameType as PrismaGameType,
 } from "@prisma/client";
 import { Category, Difficulty, GameType } from "../src/types";
+import { COUPLE_QUESTIONS as COUPLE_Q, DARES, TRUTHS } from "./content/couple";
 
 const prisma = new PrismaClient();
 
@@ -28,6 +29,8 @@ interface GameSpec {
   cardType: string; // "QUESTION" | "TRUTH" | "DARE" | "CHALLENGE" | "PROMPT"
   staticOptions?: string[];
   levels: Record<Difficulty, CardTuple[]>;
+  /** nombre de cartes par niveau (défaut PER_DIFFICULTY) */
+  perDifficulty?: number;
   gen?: {
     templates: (w: unknown, i: number) => CardTuple;
     bank: unknown[];
@@ -46,7 +49,7 @@ function card(spec: GameSpec, diff: Difficulty, tuple: CardTuple, i: number) {
 }
 
 /** Remplit les niveaux jusqu'à PER_DIFFICULTY puis renvoie tous les GameCard. */
-function mint(spec: GameSpec, target = PER_DIFFICULTY): GameCardData[] {
+function mint(spec: GameSpec, target = spec.perDifficulty ?? PER_DIFFICULTY): GameCardData[] {
   const out: GameCardData[] = [];
   for (const diff of DIFFS) {
     const base = spec.levels[diff] ?? [];
@@ -219,95 +222,52 @@ const WHO_KNOWS_BEST: GameSpec = {
 // 2) ACTION & VÉRITÉ
 // ---------------------------------------------------------------------------
 
-const TRUTH_CORE: CardTuple[] = [
-  { content: "Quel est le mensonge le plus innocent que tu m'aies dit ?", type: "TRUTH" },
-  { content: "Qu'est-ce qui t'a fait craquer pour moi au début ?", type: "TRUTH" },
-  { content: "Le souvenir le plus embarrassant avec moi ?", type: "TRUTH" },
-  { content: "Quelle est ta peur la plus ridicule ?", type: "TRUTH" },
-  { content: "De quoi es-tu le plus fier/fière dans ta vie ?", type: "TRUTH" },
-  { content: "Quelle habitude de moi tu aims le plus ?", type: "TRUTH" },
-  { content: "Quelle habitude de moi tu changerais si tu pouvais ?", type: "TRUTH" },
-];
+// Contenu écrit à la main dans prisma/content/couple.ts (3 niveaux).
+const asCards = (list: string[], type: string): CardTuple[] => list.map((content) => ({ content, type }));
+const byLevel = (src: Record<Difficulty, string[]>, type: string): Record<Difficulty, CardTuple[]> => ({
+  SOFT: asCards(src.SOFT, type),
+  NORMAL: asCards(src.NORMAL, type),
+  INTENSE: asCards(src.INTENSE, type),
+});
+const maxLen = (src: Record<Difficulty, string[]>) => Math.max(src.SOFT.length, src.NORMAL.length, src.INTENSE.length);
 
-const DARE_CORE: CardTuple[] = [
-  { content: "Envoie-moi le message vocal le plus doux que tu puisses dire maintenant.", type: "DARE" },
-  { content: "Imite ma façon de rire.", type: "DARE" },
-  { content: "Rejoue ta déclaration de départ, comme au premier jour.", type: "DARE" },
-  { content: "Danse 10 secondes sans musique, sans te vexer si je ris.", type: "DARE" },
-  { content: "Fais-moi un compliment de la tête aux pieds.", type: "DARE" },
-  { content: "Appelle-moi par trois surnoms différents, pas les habituels.", type: "DARE" },
-  { content: "Raconte notre première rencontre de mon point de vue.", type: "DARE" },
-];
+const TRUTH_LEVELS = byLevel(TRUTHS, "TRUTH");
+const DARE_LEVELS = byLevel(DARES, "DARE");
 
 const TRUTH_OR_DARE: GameSpec = {
   gameType: "TRUTH_OR_DARE",
   category: "ACTION_VERITE",
   cardType: "MIXED",
-  levels: { SOFT: [], NORMAL: [], INTENSE: [] },
-  gen: {
-    bank: [
-      ["Quel est ton plus grand secret que tu n'as jamais partagé ?", "Envoie-moi le message vocal le plus doux que tu peux dire maintenant."],
-      ["Qu'est-ce qui t'a fait craquer pour moi au tout début ?", "Imite ma façon de rire."],
-      ["Quel est ton plus grand regret amoureux avant moi ?", "Danse 10 secondes sans musique, sans te vexer si je ris."],
-      ["Quelle est la chose que tu n'oses jamais me dire ?", "Rejoue la scène de notre rencontre, sans te tromper."],
-      ["De quoi es-tu le plus fier/fière dans ta vie ?", "Fais-moi trois compliments différents."],
-      ["Quelle est ta peur la plus ridicule ?", "Mime ta journée d'hier, de A à Z."],
-      ["Quel est le tout petit plaisir dont tu ne parles jamais ?", "Trouve un surnom nouveau pour moi."],
-      ["Quelle est la plus belle preuve d'amour que tu as déjà offerte ?", "Chante les 10 premières secondes de notre chanson."],
-      ["Qu'est-ce que tu m'as pardonné sans jamais le dire ?", "Ordonne-moi un service à exécuter ce soir."],
-      ["Qu'est-ce qui te rendrait plus heureux/heureuse demain, si je le savais ?", "Fais une petite surprise à moi-même pour un souvenir."],
-      ["Le détail de moi que tu remarques en premier ?", "Raconte ton pire fou rire."],
-      ["Quel est le rêve que tu n'as jamais osé formuler ?", "Fais semblant d'être moi pendant 30 secondes."],
-    ],
-    templates: (item: unknown, i: number) => {
-      const [truth, dare] = item as [string, string];
-      return i % 2 === 0
-        ? { content: truth, type: "TRUTH" }
-        : { content: dare, type: "DARE" };
-    },
+  levels: {
+    SOFT: [...TRUTH_LEVELS.SOFT, ...DARE_LEVELS.SOFT],
+    NORMAL: [...TRUTH_LEVELS.NORMAL, ...DARE_LEVELS.NORMAL],
+    INTENSE: [...TRUTH_LEVELS.INTENSE, ...DARE_LEVELS.INTENSE],
   },
+  perDifficulty: maxLen(TRUTHS) + maxLen(DARES),
 };
 
 const TRUTH_GAME: GameSpec = {
   gameType: "TRUTH",
   category: "ACTION_VERITE",
   cardType: "TRUTH",
-  levels: { SOFT: TRUTH_CORE, NORMAL: TRUTH_CORE, INTENSE: TRUTH_CORE },
-  gen: {
-    bank: [
-      "Quel est ton plus grand secret que tu n'as jamais partagé ?",
-      "Quelle est ta plus grosse peur du couple ?",
-      "Quelle question aimerais-tu que je te pose enfin ?",
-      "Quelle est la chose la plus impulsive que tu aies faite ?",
-      "Quel est le rêve que tu n'oses pas encore formuler ?",
-      "Quel est ton plus grand moment de fierté secret ?",
-      "Quelle est ta plus grande épreuve traversée ?",
-      "Qu'e qui t'a le plus blessé(e) dans ta vie ?",
-      "Quel est ton plus beau souvenir d'enfance ?",
-    ],
-    templates: (w: string) => ({ content: w, type: "TRUTH" }),
-  },
+  levels: TRUTH_LEVELS,
+  perDifficulty: maxLen(TRUTHS),
 };
 
 const DARE_GAME: GameSpec = {
   gameType: "DARE",
   category: "ACTION_VERITE",
   cardType: "DARE",
-  levels: { SOFT: DARE_CORE, NORMAL: DARE_CORE, INTENSE: DARE_CORE },
-  gen: {
-    bank: [
-      "Chante les 10 premières secondes de notre chanson.",
-      "Mime ta journée d'hier de A à Z.",
-      "Fais trois tours sur toi-même et dis-moi qui je suis.",
-      "Envoie-moi la meilleure photo de toi et explique-la.",
-      "Rends-moi un service que je peux demander dans 24h.",
-      "Raconte ton pire fou rire.",
-      "Fais semblant d'être moi pendant 30 secondes.",
-      "Invente la suite de notre histoire à voix haute.",
-      "Dis-moi trois choses que tu aimes chez toi.",
-    ],
-    templates: (w: string) => ({ content: w, type: "DARE" }),
-  },
+  levels: DARE_LEVELS,
+  perDifficulty: maxLen(DARES),
+};
+
+const COUPLE_QUESTIONS: GameSpec = {
+  gameType: "COUPLE_QUESTIONS",
+  category: "PROFOND",
+  cardType: "QUESTION",
+  levels: byLevel(COUPLE_Q, "QUESTION"),
+  perDifficulty: maxLen(COUPLE_Q),
 };
 
 // ---------------------------------------------------------------------------
@@ -989,43 +949,54 @@ const ALL_SPECS: GameSpec[] = [
   COUPLE_BATTLE,
   TIMED_QUIZ,
   SPEED_DUEL,
+  COUPLE_QUESTIONS,
 ];
 
 async function main() {
-  // Le seed est lancé à chaque démarrage (render.yaml) : il ne doit RIEN
-  // effacer si le contenu existe déjà. Pour régénérer les cartes de force :
-  //   SEED_FORCE=1 npx prisma db seed
-  // (les réponses et sessions des joueurs ne sont jamais supprimées)
+  // Le seed est lancé à chaque démarrage (render.yaml). Il SYNCHRONISE le
+  // contenu sans jamais rien supprimer :
+  //  - ajoute les cartes nouvelles,
+  //  - désactive (isActive=false) les cartes retirées du seed,
+  //  - réactive celles qui y sont revenues.
+  // Les réponses et sessions des joueurs ne sont jamais touchées.
+  // Pour repartir de zéro sur les cartes : SEED_FORCE=1 npx prisma db seed
   const force = ["1", "true", "yes"].includes(String(process.env.SEED_FORCE ?? "").toLowerCase());
-  const existing = await prisma.gameCard.count();
-  if (existing > 0 && !force) {
-    console.log(`Seed ignoré : ${existing} cartes déjà présentes (SEED_FORCE=1 pour régénérer).`);
-    return;
-  }
-  if (existing > 0) {
-    console.log("SEED_FORCE : remplacement des cartes de contenu…");
-    await prisma.gameCard.deleteMany();
-  }
 
   const rows: GameCardData[] = [];
-  for (const spec of ALL_SPECS) {
-    rows.push(...mint(spec));
-  }
+  for (const spec of ALL_SPECS) rows.push(...mint(spec));
 
   // Filtrer les doublons de contenu au sein d'un même (gameType, difficulty)
+  const keyOf = (r: { gameType: unknown; difficulty: unknown; content: string }) => `${r.gameType}|${r.difficulty}|${r.content}`;
   const seen = new Set<string>();
   const unique = rows.filter((r) => {
-    const key = `${r.gameType}|${r.difficulty}|${r.content}`;
+    const key = keyOf(r);
     if (seen.has(key)) return false;
     seen.add(key);
     return true;
   });
 
-  await prisma.gameCard.createMany({ data: unique });
-  const byGame = new Map<string, number>();
-  for (const r of unique) byGame.set(r.gameType, (byGame.get(r.gameType) ?? 0) + 1);
+  if (force) {
+    console.log("SEED_FORCE : remplacement de toutes les cartes de contenu…");
+    await prisma.gameCard.deleteMany();
+  }
 
-  console.log(`Seed terminé : ${unique.length} cartes, ${ALL_SPECS.length} jeux.`);
+  const existing = await prisma.gameCard.findMany({ select: { id: true, gameType: true, difficulty: true, content: true, isActive: true } });
+  const existingKeys = new Map(existing.map((c) => [keyOf(c), c]));
+
+  const toCreate = unique.filter((r) => !existingKeys.has(keyOf(r)));
+  const toDeactivate = existing.filter((c) => c.isActive && !seen.has(keyOf(c))).map((c) => c.id);
+  const toReactivate = existing.filter((c) => !c.isActive && seen.has(keyOf(c))).map((c) => c.id);
+
+  if (toCreate.length) await prisma.gameCard.createMany({ data: toCreate });
+  if (toDeactivate.length) await prisma.gameCard.updateMany({ where: { id: { in: toDeactivate } }, data: { isActive: false } });
+  if (toReactivate.length) await prisma.gameCard.updateMany({ where: { id: { in: toReactivate } }, data: { isActive: true } });
+
+  console.log(
+    `Seed : ${unique.length} cartes actives pour ${ALL_SPECS.length} jeux ` +
+      `(+${toCreate.length} ajoutées, ${toDeactivate.length} désactivées, ${toReactivate.length} réactivées).`
+  );
+  const byGame = new Map<string, number>();
+  for (const r of unique) byGame.set(String(r.gameType), (byGame.get(String(r.gameType)) ?? 0) + 1);
   for (const [game, n] of [...byGame.entries()].sort((a, b) => b[1] - a[1])) {
     console.log(`  · ${game}: ${n}`);
   }
