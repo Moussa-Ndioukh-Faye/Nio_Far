@@ -1,7 +1,7 @@
 import { motion } from "framer-motion";
 import { useMemo } from "react";
 
-const COLORS = ["#E1372F", "#F2A33A", "#6B8F6F", "#F5EBDC", "#C8553D"];
+const COLORS = ["#FD2B78", "#FE4D4F", "#FFFFFF", "#FFB3D1", "#A855F7"];
 
 /** Petite pluie de confettis, sans dépendance (Framer Motion uniquement). */
 export function Confetti({ count = 36, burstKey }: { count?: number; burstKey?: string | number }) {

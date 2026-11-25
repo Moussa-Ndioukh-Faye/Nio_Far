@@ -1,7 +1,8 @@
 import { useState, useEffect, useMemo, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { AnimatePresence, motion } from "framer-motion";
-import { Mark } from "../components/Mark";
+import { Mark, Wordmark } from "../components/Mark";
+import { ACCENTS, applyAccent, savedAccent } from "../theme";
 import { InstallButton } from "../components/PwaPrompts";
 import { useGame } from "../contexts/GameContext";
 import { SERVER_URL } from "../socket";
@@ -21,7 +22,7 @@ import { Category, Difficulty, GameCatalogEntry, HistoryEntry, SessionStatus } f
 
 const NAME_KEY = "niofar_name";
 const DIFF_KEY = "niofar_difficulty";
-const PREVIEW_COUNT = 8;
+const PREVIEW_COUNT = 6; // multiple de 2 (mobile) et de 3 (ordinateur)
 
 const STATUS_LABELS: Record<SessionStatus, string> = {
   WAITING: "En attente",
@@ -141,15 +142,16 @@ export function Home() {
       {/* ---- Hero ---- */}
       <header className="mb-8 flex flex-col items-center gap-4 text-center">
         <motion.div initial={{ scale: 0.8, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} transition={{ type: "spring", stiffness: 200, damping: 14 }}>
-          <div className="animate-float">
-            <Mark size={72} />
+          <div className="animate-float drop-shadow-[0_18px_40px_rgb(var(--acc)/0.35)]">
+            <Mark size={104} />
           </div>
         </motion.div>
         <div>
-          <h1 className="font-display text-5xl font-black tracking-tight text-paper">
-            NIO <span className="italic text-clay">FAR</span>
+          <h1 className="text-6xl">
+            <Wordmark />
+            <span className="sr-only">NIO FAR</span>
           </h1>
-          <p className="mt-2 font-display text-lg italic text-sand">Jouez. Découvrez-vous. Rapprochez-vous.</p>
+          <p className="mt-5 font-display text-lg font-medium text-sand">Jouez. Découvrez-vous. Rapprochez-vous.</p>
           <p className="mt-1 text-[0.68rem] uppercase tracking-[0.24em] text-mute">
             {GAME_CATALOG.length} jeux · chacun sur son téléphone
           </p>
@@ -296,8 +298,11 @@ export function Home() {
         </section>
       )}
 
-      <footer className="mt-auto pt-12 text-center text-[0.65rem] uppercase tracking-[0.22em] text-mute">
-        NIO FAR · fait avec ❤️ à Dakar · © {new Date().getFullYear()}
+      <footer className="mt-auto flex flex-col items-center gap-3 pt-12 text-center">
+        <AccentPicker />
+        <p className="text-[0.65rem] uppercase tracking-[0.22em] text-mute">
+          NIO FAR · fait avec ❤️ à Dakar · © {new Date().getFullYear()}
+        </p>
       </footer>
 
       <GameSheet
@@ -309,6 +314,28 @@ export function Home() {
         onClose={() => setSelected(null)}
         onPlay={(g) => handlePlay(g.type, difficulty)}
       />
+    </div>
+  );
+}
+
+/** « Un clic, une couleur » : change l'accent de toute l'app. */
+function AccentPicker() {
+  const [current, setCurrent] = useState(savedAccent);
+  return (
+    <div className="glass flex items-center gap-2 rounded-full px-3 py-1.5" role="radiogroup" aria-label="Couleur de l'app">
+      <span className="text-[0.65rem] uppercase tracking-widest text-mute">Couleur</span>
+      {ACCENTS.map((a) => (
+        <button
+          key={a.id}
+          role="radio"
+          aria-checked={current === a.id}
+          aria-label={a.label}
+          title={a.label}
+          onClick={() => setCurrent(applyAccent(a.id))}
+          className={`h-5 w-5 rounded-full transition ${current === a.id ? "ring-2 ring-white ring-offset-2 ring-offset-ink" : "opacity-70 hover:opacity-100"}`}
+          style={{ background: `linear-gradient(135deg, rgb(${a.acc}), rgb(${a.second}))` }}
+        />
+      ))}
     </div>
   );
 }
@@ -345,8 +372,9 @@ function GameCard({
   return (
     <motion.div
       layout
-      initial={{ opacity: 0, y: 12 }}
-      animate={{ opacity: 1, y: 0, transition: { delay: Math.min(index, 10) * 0.03 } }}
+      initial={{ opacity: 0, y: 16, rotateX: 18, filter: "blur(12px)" }}
+      animate={{ opacity: 1, y: 0, rotateX: 0, filter: "blur(0px)", transition: { delay: Math.min(index, 10) * 0.04, duration: 0.55, ease: [0.22, 1, 0.36, 1] } }}
+      style={{ transformPerspective: 900 }}
       exit={{ opacity: 0, scale: 0.95 }}
       whileHover={{ y: -3 }}
       className={`card group relative flex cursor-pointer flex-col gap-2 overflow-hidden p-4 transition hover:${accent.ring} hover:shadow-lift`}

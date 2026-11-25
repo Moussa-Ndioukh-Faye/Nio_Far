@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { AnimatePresence, motion } from "framer-motion";
 import { useGame } from "../contexts/GameContext";
-import { Mark } from "../components/Mark";
+import { Mark, Wordmark } from "../components/Mark";
 import { PresenceBadge } from "../components/PresenceBadge";
 import { InviteShare } from "../components/InviteShare";
 import { Confetti } from "../components/Confetti";
@@ -85,8 +85,8 @@ export function Room() {
           animate={{ opacity: 1, y: 0 }}
           className="card flex flex-col items-center gap-5 p-8 text-center"
         >
-          <Mark size={56} />
-          <h1 className="font-display text-3xl font-black text-paper">On t'attend 💞</h1>
+          <Mark size={84} />
+          <h1 className="font-display text-3xl font-bold text-paper">On t'attend 💞</h1>
           <p className="text-sm text-sand">
             Tu as été invité(e) à la partie{" "}
             <span className="font-display font-bold tracking-[0.18em] text-saffron">{urlCode}</span>
@@ -143,10 +143,10 @@ export function Room() {
       {/* ---- En-tête ---- */}
       <header className="mb-5 flex items-center justify-between gap-3">
         <button onClick={leave} className="flex min-w-0 items-center gap-3 text-left" aria-label="Quitter et revenir à l'accueil">
-          <Mark size={36} />
+          <Mark size={40} />
           <div className="min-w-0">
-            <h1 className="font-display text-xl font-black leading-none text-paper">
-              NIO <span className="italic text-clay">FAR</span>
+            <h1 className="text-xl">
+              <Wordmark underline={false} />
             </h1>
             <p className="mt-1 truncate text-[0.65rem] uppercase tracking-[0.2em] text-mute">
               {CATEGORY_GLYPHS[meta.category]} {catalog?.name ?? meta.gameType} · {DIFFICULTY_LABELS[meta.difficulty]}
@@ -373,7 +373,7 @@ function WaitingRoom({
   if (!partner) {
     return (
       <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="flex flex-col gap-4">
-        <div className="flex items-center justify-center gap-2 text-center font-display italic text-sand">
+        <div className="flex items-center justify-center gap-2 text-center font-display font-medium text-sand">
           <motion.span animate={{ scale: [1, 1.25, 1] }} transition={{ duration: 1.6, repeat: Infinity }}>
             💌
           </motion.span>
@@ -468,7 +468,7 @@ function FinishedScreen({
             {result.coupleScorePct}
             <span className="text-4xl text-saffron">%</span>
           </p>
-          <p className="mt-2 font-display italic text-sand">{isTurnBased ? "de cartes relevées" : "de complicité"}</p>
+          <p className="mt-2 font-display font-medium text-sand">{isTurnBased ? "de cartes relevées" : "de complicité"}</p>
         </div>
         <p className="font-display text-xl font-bold text-paper">{result.verdict}</p>
 
