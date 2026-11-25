@@ -20,8 +20,8 @@ export default defineConfig({
         scope: "/",
         display: "standalone",
         orientation: "portrait",
-        background_color: "#191210",
-        theme_color: "#191210",
+        background_color: "#070113",
+        theme_color: "#070113",
         categories: ["games", "entertainment", "lifestyle"],
         icons: [
           { src: "/icons/icon-192.png", sizes: "192x192", type: "image/png", purpose: "any" },
@@ -36,26 +36,12 @@ export default defineConfig({
       },
       workbox: {
         globPatterns: ["**/*.{js,css,html,svg,png,ico,woff2}"],
+        // image de partage (réseaux sociaux) : inutile hors ligne
+        globIgnores: ["brand/**", "**/*-{cyrillic,cyrillic-ext,greek,greek-ext,hebrew,vietnamese,math,symbols}-*.woff2"],
         navigateFallback: "/index.html",
         // l'API et le WebSocket ne doivent jamais passer par le cache
         navigateFallbackDenylist: [/^\/api\//, /^\/socket\.io\//],
         cleanupOutdatedCaches: true,
-        runtimeCaching: [
-          {
-            urlPattern: ({ url }) => url.origin === "https://fonts.googleapis.com",
-            handler: "StaleWhileRevalidate",
-            options: { cacheName: "google-fonts-css" },
-          },
-          {
-            urlPattern: ({ url }) => url.origin === "https://fonts.gstatic.com",
-            handler: "CacheFirst",
-            options: {
-              cacheName: "google-fonts-files",
-              expiration: { maxEntries: 20, maxAgeSeconds: 60 * 60 * 24 * 365 },
-              cacheableResponse: { statuses: [0, 200] },
-            },
-          },
-        ],
       },
       devOptions: { enabled: false },
     }),
